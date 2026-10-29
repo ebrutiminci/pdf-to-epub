@@ -1,0 +1,1567 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reflow PDF to EPUB</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a binder's workbench. Left column is the source PDF and its settings; right column is a proof of the finished book in an e-reader frame. */
+:root {
+  --paper: #f2f3ef;
+  --surface: #ffffff;
+  --ink: #1c2021;
+  --muted: #5b6662;
+  --line: #d8ddd7;
+  --accent: #2e5c4f;
+  --accent-ink: #ffffff;
+  --accent-soft: #e2ebe6;
+  --warn: #8f5512;
+  --warn-soft: #f6ead9;
+  --danger: #a3392d;
+  --reader: #fbfaf5;
+  --reader-ink: #26241f;
+  --reader-muted: #7a756b;
+  --shadow: 0 1px 2px rgba(20, 30, 26, .06), 0 8px 28px rgba(20, 30, 26, .07);
+  --display: 'Literata', Georgia, 'Times New Roman', serif;
+  --ui: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #111413; --surface: #191d1c; --ink: #e6eae7; --muted: #98a39e; --line: #2b3230;
+    --accent: #84c2ad; --accent-ink: #0c1613; --accent-soft: #1d2d28; --warn: #e3aa60; --warn-soft: #2e2416;
+    --danger: #f0897b; --reader: #1c1e1d; --reader-ink: #dcd7cb; --reader-muted: #9c968a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 28px rgba(0, 0, 0, .25);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #111413; --surface: #191d1c; --ink: #e6eae7; --muted: #98a39e; --line: #2b3230;
+  --accent: #84c2ad; --accent-ink: #0c1613; --accent-soft: #1d2d28; --warn: #e3aa60; --warn-soft: #2e2416;
+  --danger: #f0897b; --reader: #1c1e1d; --reader-ink: #dcd7cb; --reader-muted: #9c968a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 28px rgba(0, 0, 0, .25);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--paper); color: var(--ink); font: 15px/1.5 var(--ui);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 48px;
+}
+.wrap { max-width: 1240px; margin: 0 auto; }
+header.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; padding-block: 28px 22px; }
+.mark { font: 600 26px/1.1 var(--display); letter-spacing: -.01em; margin: 0; }
+.mark span { color: var(--accent); }
+.tag { color: var(--muted); margin: 0; flex: 1 1 320px; }
+.private { font: 500 12px/1 var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 6px 10px; white-space: nowrap; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
+.side { display: flex; flex-direction: column; }
+.sec { padding: 18px 20px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
+.sec:first-child { border-top: 0; }
+.sec h2 { font: 600 11px/1 var(--ui); text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 0; }
+
+/* drop zone */
+.drop { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 8px;
+  min-height: 190px; padding: 22px; border: 1.5px dashed var(--line); border-radius: 8px; cursor: pointer; transition: border-color .15s, background .15s; }
+.drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.drop strong { font: 600 17px/1.3 var(--display); }
+.drop small { color: var(--muted); }
+.glyph { width: 46px; height: 56px; border: 1.5px solid var(--ink); border-radius: 3px 12px 3px 3px; position: relative; opacity: .8; }
+.glyph::before, .glyph::after { content: ""; position: absolute; left: 8px; right: 8px; height: 1.5px; background: var(--ink); top: 20px; box-shadow: 0 7px 0 var(--ink), 0 14px 0 var(--ink), 0 21px 0 var(--ink); }
+.glyph::after { display: none; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; position: relative; z-index: 1; }
+
+.filecard { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 14px; align-items: start; }
+.thumb { width: 74px; aspect-ratio: 1 / 1.35; max-width: 100%; border: 1px solid var(--line); border-radius: 3px; background: #fff; overflow: hidden; display: grid; place-items: center; }
+.thumb canvas { width: 100%; height: auto; display: block; }
+.fname { font-weight: 600; overflow-wrap: anywhere; margin: 0 0 2px; }
+.fmeta { color: var(--muted); font: 12.5px/1.5 var(--mono); margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip { font: 500 12px/1 var(--ui); padding: 5px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.swap { justify-self: start; grid-column: 1 / -1; }
+
+.note { font-size: 13.5px; padding: 10px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); margin: 0; }
+.note.err { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+
+label.f { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); font-weight: 500; min-width: 0; }
+input[type=text], input[type=password], select {
+  font: 15px/1.3 var(--ui); color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 7px; padding: 9px 10px; width: 100%; min-width: 0;
+}
+input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.row2 { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 10px; }
+
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label { display: flex; flex-direction: column; gap: 3px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: 12.5px; color: var(--muted); line-height: 1.35; }
+.seg label b { font-size: 14px; color: var(--ink); font-weight: 600; }
+.seg input:checked + label { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.seg input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.checks { display: flex; flex-direction: column; gap: 9px; }
+.chk { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: start; font-size: 14px; cursor: pointer; }
+.chk input { margin: 2px 0 0; width: 16px; height: 16px; accent-color: var(--accent); }
+.chk small { display: block; color: var(--muted); font-size: 12.5px; }
+
+details.adv summary { cursor: pointer; font-weight: 600; font-size: 14px; list-style: none; display: flex; align-items: center; gap: 8px; }
+details.adv summary::-webkit-details-marker { display: none; }
+details.adv summary::before { content: ""; width: 7px; height: 7px; border-right: 1.5px solid var(--ink); border-bottom: 1.5px solid var(--ink); transform: rotate(-45deg); transition: transform .15s; }
+details.adv[open] summary::before { transform: rotate(45deg); }
+.advbody { display: flex; flex-direction: column; gap: 12px; padding-top: 14px; }
+
+.go { display: flex; flex-direction: column; gap: 10px; }
+.btn { appearance: none; border: 0; border-radius: 8px; padding: 13px 18px; font: 600 15px/1 var(--ui); cursor: pointer; background: var(--accent); color: var(--accent-ink); transition: filter .15s, transform .05s; }
+.btn:hover { filter: brightness(1.06); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.prog { display: flex; flex-direction: column; gap: 6px; }
+.bar { height: 6px; background: var(--accent-soft); border-radius: 99px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .2s; }
+.progline { display: flex; justify-content: space-between; gap: 10px; font: 12.5px/1.4 var(--mono); color: var(--muted); }
+.progline button { font: inherit; color: var(--danger); background: none; border: 0; cursor: pointer; padding: 0; text-decoration: underline; }
+
+/* proof */
+.proof { display: flex; flex-direction: column; min-width: 0; }
+.result { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 20px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.stats { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0; }
+.stats div { display: flex; flex-direction: column; }
+.stats dt { font: 600 10.5px/1.3 var(--ui); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.stats dd { margin: 0; font: 500 16px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+.dlrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dlmsg { font-size: 13px; color: var(--muted); flex-basis: 100%; margin: 0; text-align: right; }
+.toolbar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.toolbar select { flex: 1; min-width: 0; padding: 7px 9px; font-size: 14px; }
+.nav { background: transparent; border: 1px solid var(--line); color: var(--ink); width: 34px; height: 34px; border-radius: 7px; cursor: pointer; font: 16px/1 var(--ui); flex: none; }
+.nav:disabled { opacity: .35; cursor: default; }
+
+.reader { background: var(--reader); color: var(--reader-ink); border-radius: 0 0 var(--r) var(--r); height: min(78vh, 860px); min-height: 420px; overflow-y: auto; }
+.page { max-width: 36em; margin: 0 auto; padding: 44px 28px 64px; font: 17px/1.62 var(--display); }
+@media (max-width: 560px) { .page { padding: 28px 18px 48px; font-size: 16px; } }
+.page p { margin: 0; text-indent: 1.4em; text-align: justify; hyphens: auto; }
+.page.spaced p { text-indent: 0; margin: 0 0 .8em; }
+.page h1, .page h2, .page h3, .page h4, .page h5, .page h6 { font-family: var(--display); font-weight: 600; line-height: 1.25; text-wrap: balance; margin: 1.6em 0 .8em; text-indent: 0; }
+.page h1 { font-size: 1.55em; margin-top: .6em; }
+.page h2 { font-size: 1.3em; } .page h3 { font-size: 1.12em; } .page h4, .page h5, .page h6 { font-size: 1em; }
+.page :is(h1, h2, h3, h4, h5, h6) + p, .page .fig + p, .page p.center + p, .page p.noind { text-indent: 0; }
+.page p.center { text-align: center; text-indent: 0; margin: .8em 0; }
+.page p.hard { text-indent: 0; text-align: left; }
+.page p.li { text-indent: -1.2em; margin-left: 1.2em; text-align: left; }
+.page p.fn { font-size: .82em; text-indent: 0; color: var(--reader-muted); margin: .4em 0; }
+.page .fig { text-align: center; margin: 1.2em 0; text-indent: 0; }
+.page .fig img { max-width: 100%; height: auto; }
+.page .pageimg img { width: 100%; box-shadow: 0 0 0 1px var(--line); }
+.page .cover img { display: block; max-width: 70%; margin: 0 auto; box-shadow: var(--shadow); }
+
+.empty { max-width: 34em; margin: 0 auto; padding: 56px 28px; display: flex; flex-direction: column; gap: 18px; font-family: var(--display); }
+.empty h3 { font-size: 26px; line-height: 1.2; margin: 0; font-weight: 600; text-wrap: balance; }
+.empty p { margin: 0; color: var(--reader-muted); font-size: 16.5px; line-height: 1.6; }
+.steps { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; font-family: var(--ui); }
+.steps li { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; font-size: 14.5px; line-height: 1.5; }
+.steps li span { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--reader-muted); display: grid; place-items: center; font: 500 12px/1 var(--mono); color: var(--reader-muted); }
+.steps b { color: var(--reader-ink); }
+
+.limits { margin-top: 22px; color: var(--muted); font-size: 13.5px; max-width: 70ch; display: flex; flex-direction: column; gap: 6px; }
+.limits h2 { font: 600 11px/1 var(--ui); text-transform: uppercase; letter-spacing: .09em; margin: 0 0 4px; }
+.limits p { margin: 0; }
+
+.pw { display: flex; gap: 8px; }
+.pw input { flex: 1; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <h1 class="mark">Reflow <span>PDF → EPUB</span></h1>
+    <p class="tag">Turns a PDF into a real e-book: text that reflows on any screen, chapters in the table of contents, figures kept.</p>
+    <span class="private">Runs in your browser · files never leave it</span>
+  </header>
+
+  <div class="grid">
+    <aside class="panel side" aria-label="Source and settings">
+      <div class="sec">
+        <h2>Source PDF</h2>
+        <label class="drop" id="drop">
+          <input type="file" id="file" accept="application/pdf,.pdf" aria-label="Choose a PDF file">
+          <div class="glyph" aria-hidden="true"></div>
+          <strong>Drop a PDF here</strong>
+          <small>or click to choose a file · any size</small>
+          <small>No PDF handy? <button type="button" class="linkbtn" id="sample">Try the sample book</button></small>
+        </label>
+        <div class="filecard" id="filecard" hidden>
+          <div class="thumb" id="thumb"></div>
+          <div>
+            <p class="fname" id="fname"></p>
+            <p class="fmeta" id="fmeta"></p>
+            <div class="chips" id="chips"></div>
+          </div>
+          <button type="button" class="linkbtn swap" id="swap">Choose another file</button>
+        </div>
+        <form class="pw" id="pwform" hidden>
+          <input type="password" id="pw" placeholder="This PDF needs a password" autocomplete="off" aria-label="PDF password">
+          <button class="btn" type="submit">Open</button>
+        </form>
+        <p class="note" id="notice" hidden></p>
+      </div>
+
+      <div class="sec">
+        <h2>Book details</h2>
+        <label class="f">Title <input type="text" id="title" placeholder="Read from the PDF"></label>
+        <div class="row2">
+          <label class="f">Author <input type="text" id="author" placeholder="Unknown"></label>
+          <label class="f">Language <input type="text" id="lang" value="en" maxlength="12" aria-describedby="langhelp"></label>
+        </div>
+        <small id="langhelp" hidden>Language code such as en, de, fr, tr</small>
+      </div>
+
+      <div class="sec">
+        <h2>Layout</h2>
+        <div class="seg" role="radiogroup" aria-label="Layout">
+          <input type="radio" name="layout" id="lay-flow" value="flow" checked>
+          <label for="lay-flow"><b>Reflowable</b>Text resizes to the screen. Best for books and reports.</label>
+          <input type="radio" name="layout" id="lay-fixed" value="fixed">
+          <label for="lay-fixed"><b>Page images</b>Exact look of each page. For comics, scans, magazines.</label>
+        </div>
+        <label class="f">Chapters
+          <select id="chapters">
+            <option value="auto">Automatic</option>
+            <option value="outline">From the PDF's bookmarks</option>
+            <option value="headings">From large headings</option>
+            <option value="pages">Every 20 pages</option>
+            <option value="none">One continuous file</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="sec" id="cleanup">
+        <h2>Cleanup</h2>
+        <div class="checks">
+          <label class="chk"><input type="checkbox" id="o-running" checked><span>Remove running headers and page numbers</span></label>
+          <label class="chk"><input type="checkbox" id="o-headings" checked><span>Detect headings<small>Larger or bold lines become real headings</small></span></label>
+          <label class="chk"><input type="checkbox" id="o-style" checked><span>Keep bold and italic</span></label>
+          <label class="chk"><input type="checkbox" id="o-figs" checked><span>Include figures and photos</span></label>
+          <label class="chk"><input type="checkbox" id="o-pageimg" checked><span>Keep pages without text as images<small>Covers, plates, scanned pages</small></span></label>
+          <label class="chk"><input type="checkbox" id="o-fn" checked><span>Keep footnotes after the paragraph they interrupt</span></label>
+        </div>
+      </div>
+
+      <div class="sec">
+        <details class="adv">
+          <summary>More options</summary>
+          <div class="advbody">
+            <label class="f">Pages to convert <input type="text" id="range" placeholder="All pages, or e.g. 1-120, 130"></label>
+            <label class="f">Paragraph style
+              <select id="pstyle">
+                <option value="indent">Indented first line, like a printed book</option>
+                <option value="spaced">Space between paragraphs</option>
+              </select>
+            </label>
+            <label class="f">Image quality
+              <select id="quality">
+                <option value="std">Standard, smaller file</option>
+                <option value="high">High, sharper images</option>
+              </select>
+            </label>
+            <label class="chk"><input type="checkbox" id="o-cover" checked><span>Use page 1 as the cover</span></label>
+            <label class="f">Or upload a cover image
+              <input type="file" id="coverfile" accept="image/jpeg,image/png,image/webp">
+            </label>
+          </div>
+        </details>
+      </div>
+
+      <div class="sec go">
+        <button class="btn" id="convert" disabled>Convert to EPUB</button>
+        <div class="prog" id="prog" hidden>
+          <div class="bar"><i id="barfill"></i></div>
+          <div class="progline"><span id="progtext">Starting</span><button type="button" id="cancel">Cancel</button></div>
+        </div>
+      </div>
+    </aside>
+
+    <section class="panel proof" aria-label="Book preview">
+      <div class="result" id="result" hidden>
+        <dl class="stats" id="stats"></dl>
+        <div class="dlrow">
+          <button class="btn" id="download">Download EPUB</button>
+          <p class="dlmsg" id="dlmsg" hidden></p>
+        </div>
+      </div>
+      <div class="toolbar" id="toolbar" hidden>
+        <button class="nav" id="prev" aria-label="Previous chapter">‹</button>
+        <select id="chsel" aria-label="Chapter"></select>
+        <button class="nav" id="next" aria-label="Next chapter">›</button>
+      </div>
+      <div class="reader" id="reader">
+        <div class="empty" id="empty">
+          <h3>Your book will appear here, page by page, the way an e-reader shows it.</h3>
+          <p>Every step runs on this device. Nothing is uploaded, so private and large documents are fine.</p>
+          <ol class="steps">
+            <li><span>1</span><div><b>Add a PDF.</b> Title, author and bookmarks are read from the file.</div></li>
+            <li><span>2</span><div><b>Convert.</b> Lines are rejoined into paragraphs, hyphenated words are repaired, headers and page numbers are removed, and figures are cut out of the page.</div></li>
+            <li><span>3</span><div><b>Check the proof, then download.</b> The EPUB 3 file opens in Apple Books, Kobo, Google Play Books, Calibre, and Kindle via Send to Kindle.</div></li>
+          </ol>
+        </div>
+        <article class="page" id="page" hidden></article>
+      </div>
+    </section>
+  </div>
+
+  <section class="limits">
+    <h2>What converts well</h2>
+    <p>Novels, reports, papers and manuals with a real text layer convert best. Scanned PDFs have no text to reflow, so choose Page images for them. Tables and vector charts are kept as text lines, and complex multi-column magazine layouts may need the Page images layout.</p>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script type="module">
+const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/';
+const SAMPLE_PDF = 'JVBERi0xLjQKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUiAvRjMgNCAwIFIgL0Y0IDYgMCBSCj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nIC9OYW1lIC9GMSAvU3VidHlwZSAvVHlwZTEgL1R5cGUgL0ZvbnQKPj4KZW5kb2JqCjMgMCBvYmoKPDwKL0Jhc2VGb250IC9UaW1lcy1Cb2xkIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nIC9OYW1lIC9GMiAvU3VidHlwZSAvVHlwZTEgL1R5cGUgL0ZvbnQKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0Jhc2VGb250IC9UaW1lcy1JdGFsaWMgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YzIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNSAwIG9iago8PAovQ29udGVudHMgMTcgMCBSIC9NZWRpYUJveCBbIDAgMCA0MTkuNTI3NiA1OTUuMjc1NiBdIC9QYXJlbnQgMTYgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjYgMCBvYmoKPDwKL0Jhc2VGb250IC9UaW1lcy1Sb21hbiAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjQgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iago3IDAgb2JqCjw8Ci9Db250ZW50cyAxOCAwIFIgL01lZGlhQm94IFsgMCAwIDQxOS41Mjc2IDU5NS4yNzU2IF0gL1BhcmVudCAxNiAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKOCAwIG9iago8PAovQml0c1BlckNvbXBvbmVudCA4IC9Db2xvclNwYWNlIC9EZXZpY2VSR0IgL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9EQ1REZWNvZGUgXSAvSGVpZ2h0IDM4MCAvTGVuZ3RoIDIwOTA4IC9TdWJ0eXBlIC9JbWFnZSAKICAvVHlwZSAvWE9iamVjdCAvV2lkdGggNjAwCj4+CnN0cmVhbQpzNElBMCEiX2FsOE9gW1whPDwqIyEhKiciczRbTkAhIVdRMCJwRyw2InBHMjkjNmtHQCYuL2FOI21xQFYlaCchYydHcVonJ0dfSCYqQDJkRylePz08KCpHLk4sOjRjZS5PYzVXL01KYikwSTgrci4wJiQlNk5JRHMjNzpfRCcrLCdbLWxOaj4tbiRKbC1uJEpsLW4kSmwtbiRKbC1uJEpsLW4kSmwtbiRKbC1uJEpsLW4kSmwtbiRKbC1uJEpsLW4kSmwtbiwsMiEiZko7SGlkQ1AhP3FMRiZITXRHIVdVKDwqcmw5QSJUXFcpITxFMyR6ISEhISIhV3JRLyJwWUQ/JDRIbVAhNDxAPCFXYEIqIVgmVC8iVSJyLiEhLktLIVdyRSomSHJkajBnUSFXOy4wXFJFPjEwWk9lRSUqNkYiP0E7VU90WjFMYkJWI21xRmEoYD01PC03OjJqLlBzIkAyYE5mWTZVWEA0N24/M0Q7Y0hhdD0nL1UvQHE5Ll9CNHUhb0YqKVBKR0JlQ1pLN25yNUxQVWVFUCo7LHFRQyF1LFJcSFJRVjVDL2hXTio4MVsnZD9PXEBLMmZfbzBPNmEybEJGZGFRXnJmJThSLWc+ViZPalE1T2VraXFDJm8oMk1IcEBuQFhxWiJKNipydT9EITxFMyUhPEUzJSE8PCoiISEhISIhV3JRLyJwWUQ/JDRIbVAhNDxDPSFXYD8qIjlTYzMiVSJyLiE8UkhGITxOPzgiOWZyJyJxajQhI0BWVGMrdTRdVCdMSXFVWiwkX2sxSypdV0BXS2onKCprYHEtMU1jZykmYWhMLW4tVycyRSpUVTNeWjsoN1JwIUA4bEpcaDxgYEMrPiU7KVNBblBka0MzK0s+RydBMVZIQGdkJktuYkE9TTJJSVtQYS5RJFIkakQ7VVNPYGBWbDZTcFpFcHBHW15XY1ddIylBJ2BRI3M+YWlgJlxlQ0UuJWZcLCE8ajVmPWFrTk0wcW8oMk1IcEBuQFhxWiM3TCRqLU0xIVlHTUghJ15KWzE1W0tdOGRadUBKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbV4hSi1tXiFKLW1eIUotbWZkZWMkdEEublQ8R2VgJlkuNFBdPyQuaVkhZyk6K05kRGRONGIzOVkvKG9qP0UrNl0wXSg4XlZaMlJKMjZSRWxlQjpfO21BPCxqLS5XXGBcdUdVIlElITc9O1NHcm05TEhcVTBVaVstXWNrI25xLERfYkRbUEREdUlTO0tKIVZSLTRmPXBsL1k/TFEtRnAvKyRYZl41cEZeaG0wSnBjPmZCTTYkSUc+UzknXmZRU0tYNTUyMy5oVCxAPzhmJkJuXFQrVTs2Y1ApXSxOX0FUJE9iKD1PKDxAV2dNWUxPVF46Vm11LGVNUURWbjlPKClzM19aLElSUlMvOXMyVCYmUEJxanJaJkdGakomXCFTY0MmJSVAKipqKVUpZ1tbR1gsRVBqNztfcVlrOEM8ImVRNG5wZVRpRkI7V1FEMCc4KS9aTC1XJlsna28sLyRfY1YvQD5sWChyODk6OlBiNSxlSl1MNTU4anI8KWBNcXNiTCYhJC8ta1RAdWFMXDxVcEQwLWxWYSt1YlxbLDtTRzY8KDksNG0/PFQwP1RNJVMxRVMpMUxBcTcuUDViTl07dVpoSTVRLlVDcGg7RFhQcz1pN3JyQ2NSa0YqZzIkUj1rUnBoO0RYUHM9aTdyckNjT3JyQGU6cnJCI3Nycj1ONXJNbVNXVTVRN101LGVKXUw1NThqcjwpYE1xc2JMJiEkLypZSiZoUWgjQDFZKyUuUylgOzc6Ty5wP0dMLyQwMz47RjQ1WWNxSyQha2Q3NXUvLlIpI1QhLzhoWSs4UUx0aklPP2shI3IocnJZKD4hcnJDRW5UbXUiOzBFKkg4J1ZfM1JFaEImND02SHV1bzMwcDxFR1s3Z2NQKS1bT3U9ZjJedVElcytHN3NUV21cVS1HZ0IkbUJzIyQ+V0I3QyIsM0RnQ1xCJGNgUnQqVkRgZDdLTTNKR1YoXkk8T0hVT0xRUi8kaGxeWzBxQ0E7KyxmVCxLKylYPFNgZm5LSGNxKiVhUmgkYz9qc2FwNVJMM283KzIqKXNeYT1iUE5paUVQJkFwXTRPLU5rOW0sZUkpbjxObWFQO0VUX3IhXzxqVCY/Zi0lSmdgJEsqYzYrPk9yLlRzITBKTlhhLzY6TzViRzRzRCZGYC8jNlsnQGpZVyRJQm9mSjolI08/aml0N2xkRmo4Z3BFYiJWYWchIlZhZyEiVmFnISJWYWchIlZhZyEiVmFnISJWYWchIlZhZyEiVmFnISJWYWchIlZhZyEiVmFnISJWYWchIlZhZyEiVmFnISJWYWchIlZhZyEiVmFnISJWYWchIlZhZyEiVmFnISJWYWchIlZudCNfcj9gMjQ9bE4lUlpyIz9CXkhcRFo2RiFNLmZkRDkzJ29GS2I0SVs4KHA9X0ZHTzVSOWhUSiNGKTc1I2pbNi1yQWFzRlJWWmIkSic+Y24qKildW2d0Ij1EUDg5cVAqbyhZNSRsUzxuUF1lLyJAVGoqXT1zLD1UXVNBV0hwPUpiW2licG5RbEFLWD5ZVS5nXWs9bVspLW9bXSwpI1k1ZkZaITMmMyRKYlRCRUJCOl5IPFJjLzxLdCxbOm1kSSZRJlpoPFQxb3FLPWkiZFR1LGIwNE1WYjxEWztxTzMqbmJeOURNbURRTmcxXXRvJSZIY3IvaU1YZzFRQTFEY05rJF1CPEhYQj9MXmUoaVhPcE9laD00OkJoW0FfZGtRaGVrRVNhLj9ESXUxSjhkS0xDKz0qXyJWZHU1TllFK1NLaEBaOltwWXVkY25aTGhpYFFmUEVkYFg2W2E/XWs+YG1nMSE3JUU/QilBVCc0VSNUIy5cKk47NS9OalUpMmlEYCUicGorJ11sXWRvYDlOPVp0USo+KyhMTWI1PDxiaDM7SydIbG1oQjohRGkmaG9bRWc/Kk1fdC5vW0VnPypOUEUkIltCOEFkbmZtYk9QKFVuLVUxNTg3MCQwXSoxai8qZFBbaG5FT0VOOFptX1JVX2YkcUAuIjtfQE4vWE1fWDlaODtDKycwKk1VbDw9cW9UQzM3N1BrVTJMXG1FbCw8WDdkOHNNbkl0YnU/bzIpaWpVUyYoZzFdW2JuQmM/LTlVTnNXLHFQRWs/U1c+U25bZ3M4UEIsVERtRUtnM2VUWkc9TlBgNUhyOGNcT0YmLF5fQ0w3YEl0O2osVTFKWG0vb2QmXXBAJidQV1wkMzs6QkArYDlUWSdqNmQ/UVpwNlcxcEgmJUdtLjBfVFota25SbSJIWCEkMWgqOmVXITdYQV8vM1tybUJhU2MrZVs5WWpxW3Fnc01ybUxXSEV1UlxmMTxRO3AlTEgkJkUnX09TWDBxY3JWcihlRVt1b00yZjJMQy84IkdpMCtjWShySzgoQSlKaytqLVdTbnFbKltdOi9LJWo9ZCU7KzBUJFZYNjwiW18wPFFvSSZKJm04QHQ6LzxrXFIlQDdCKUNzLHIvK0pQNmhCREoscWE6NjVBQkZFODRnOGckTl5JXDRII0IrXEUpJilDP0FESyZVNUM/MTsrMjAhOysyMCE7KzIwITsrMjAhOysyMCE7KzIwITsrMjAhOysyMCE7KzIwITsrMjAhOysyMCE7KzIwITsrMjAhOysyMCE7KzIwITsrMjAhOysyMCE7LVpXMCV1R2BXbjZOXWtHQkZxT1hKZWc9SG5DYShZYlZMSyt0dUBkUUtnNGpDZ3QrcG5gUm07JzZxIjNcLC9caERPMSoqWjxAbVFlRiIwOXJxIzVVIkU6Nz1tMWMlb2ReZiE3TyQ1MUBCPlJ0dF5ZMW9aWzcmMTlQMGVzOV9mM1BUcEpWTDEsRjAyUEJzNCpqSDE+c29oQ1w/JHJtQ1w2VjdwJHRRQHVGNjQsLCMxXV9QVUUqJUFaYjc9IXUwL19tXzcnTiVkdERYcTJxQ0FPQWQrZj9NP1MxOWBwWDNvWUBeTywqLG9mKXBbJUt1aTA5L1wiSV8wcm9GS1hRXyFERWRfVidFRVhgMEs5Y1I7cG0qOm1ccUdeSi9MZFk5L2YoXEpHajRvWyNBS0BSWGNlXyFGcGZkVDBaWT0iQTE/W0lpYD5zITZcSWpAdDlSNm5QMGsqUENmSFNQP0xwXiJWN2xbbENYVi1DbFVcbCE7ZDJUZypkI3BmWT9bS3JdPFgmXlpoWnE0JyppJyRAY09iITJjQ2BtMy9icHEtNFUkLmRbb042Z1NpPlZycGNpPVtDc01xQVJiVUoyNWdiPS9tQFtSVVtkRkwnL1Q8PjRiVnE0VmFwQzdiUHA7NG4yQ1dVZFhhYElZTkEva2M3RWdobm49TUdjNHBkJjdwc2BnUjgsJlRtTSRWcGkoWE8nZj9bKzhhT00kVU0mNjBCOHRDL1c/MWA3NzAkaUY9dSc7T3E3dF40NzksWihlITlhTFtvcmNgXS5YOzc5KD1pbUcvXjw3cTo2Y1RrWjokayYrT2BaIlpeJkwuMmIrakNRNSc9NS5VL1FgcFg/MkxNUm0ocnI/S2IqO2wuJCF0MFA7YDQsZWRVW0pCSkovUE9pWUtuXWJdRmpaYWA4MXNYKDcwQzI9SCo3W1RqN2FHNUsxdVsnXWs3I1VoJkxHV190Ll1xZWg7X0l0c1g0SHA/V09NVmQ+cG9XO0VTVFgyLmwrb1lqY2JFLjVrU1xUKyRaXnFGPzUqOGY4OysyMCkuJilTIS4mKVMhLiYpUyEuJilTIS4mKVMhLiYpUyEuJilTIS4mKVMhLiYpUyEuJilTIS4mKVMhLiYpUyEuJilTIS4mKzU0TS1nbFBJZlw8QlwmKGU/N1dgNm9jNFcmSSFRLW9eRT0zMWZQTGZmbWkjMSdcM2kvLiNWOzE+c1hpdHNzPHBAPiQ/X1dWRDhONlxbOEtcTDtJLFhUV2ovKTE+bzRkJWpCZTQoY2ZjJ2tqcmBcKShnakZYMmAlam1obXNXW1VTO1FuOyEja1hVPk9lO1pbc0lHblMpcyZMX01Tc2M8SzlVTSsrVkpWJi1iX0FZJ1FlX1YlQkFZSHI3OEsjWDUwN09bQ1UzWGtsX2tELXA0QmlPMjtRNTtSVlNTcSV1QWgnOWJVazRMU2gnTW5nITliazpeSzhscXNDPj0hW1ZEOihQO2E7JHAuM0l1VyxNJnJtUi9UI0EiXklkUCw9blMqXHRDLUtQKTk1YmksV0syVThDUnQ+OT5IdW1WNjo8KzMqQz0kMzZ0bUJkTCxaTy1fLDkyKEdQJUtgRFdsNVQpbUksOVtuYlYrTEFwXlVhMnVkXDs3P0k/JSomcjk3OCheUFRjJkYnIzw1JEBjT2IhMmNDYG0yb2c7ITJjQ2BtOUhCOS5LLDIoUlhhQSlORlsmIlwwcCdAWTBmS0s1MCMlTklXV0pDLXBNbz9Mb2ktVCIiOyYwMzghLFIxOkFWOyRvI0kva1woJkJNVUhpclMrbHRJZ2YuIVleVl0mW0goWUxEPDZvPjBwJ2EqRDY6IlApIjxUdXIlIV4yIXFMZTY6aktoZS0wY24/OmQ2SlJpNXBDR01PJj0ubD44N1I0bl0/cXEiU1dUMlJtZyspWC9ASz5PKUQ/LyEoQUZGLWYsXChVVElJXGVeS2ZaYTEjNyJVND11XlhYVG83SExUZGNXNkddPEgwJ0FrITA0YSZpSykhLD0yTHBIU1pKb11WTWM/RDsndDUsZ0YtczxmX048XDVaVSU0IWhhVnFvTT9lJE50JD5oOSg+KjJcck1KaypUYHU5KnFdXC9ZaiopcyJdJUw7IzZaKiQ8aXBgW2lORWdYXik1Qjo7OilMV1piJEtRaE9sUTY0W1VZJDBeKklBajkqbT1xUW8tXmBMU2cpaEgkMWhUNC0/KT5GbE4tWSZaPi5gLGgsbTJcZUgqOixgPi48aDc/SWEvMl4mJ1pnXDFVNDxTIVU0PFMhVTQ8UyFVNDxTIVU0PFMhVTQ8UyFVNDxTIVU0PFMhVTQ8UyFVNDxTIVU0PFMhWTZrIWVuVDRSXG0yZDg6WGlMPzVIJmhJaDFdSUZycmlzSW1rR1BBMSVtZmY4XzdMLixSUWhUUDFLbyRJbUNGcypjZTxOa3JTLSs4MWNESl1uK1dWYTUkVnEtbmp1YGVvJWhPXT8hTCRCRiJFTU4vIiVaRzdQKWonakg8OmFQS21vKC5sUWchPFhMOVU5Lyc/YC1FbDFZI2wvaihJanRYaSJmWjtwUy5BRCFcdUhLM1c1JytTOl1YITdXRmNMNCxoOk8hNksrYSRxS2JzQUJPSCszRTUmM1BgR1VncmopXU84UlloKG5VOEVoKGpNQWpkb2VaW1k5LG5SOWQ7VjZFJ207KkxOcz9WbmVDO3RLPF1gL1Uva1s5UGRdPVdCJG4/aSNWYm9cXydXUixMRlwwV0hXUkIzYXFxK2RBY2luX0ZxSDlLMmlgUTFIVi0nS3RAMkZ0IVRGQWUvRG47Yiljcj5WUjtESmdfNEJBIWUhTTFrZyw6QDB1LUNoTV1UOihvU0RKSmhZIURpJmhvW0VnPypNX3Qub1tFZz8qTlBFJCJbQjhBZG5mbWJSYXQ0Mi9lP1FrXWdWcDZSbExLNlZ0JFcnQmdCdGllNWkrUyFLdE9IMTxSQ1pNSlswLilEbDl1NzNxV0ghK2YjL2hVNDRTRWtkVCNwMjMoUSVKaW0pQy47JTskaXFGL1QoMEM/aldoNixEI2RVYDhERVJvOlprYFJbWk5YaCs3L1QmPCk8Y14nck5TaC1mLFwoVVRJSVxlXktmWmExIzRQSnRlUDZQT0FvJTs6X1M8SjI6ZkdHa2lGOnFNTCQ5Ll9QSnUtPFlkdXJjQTE1ODNlQylPXF4oMEQ2PlIsWmlOcEs6QFdoazIsJlQzJWdLSGwpaSw4LE9iIUc8IUxsTT02dGtBViVWYDlOb08jSFdOTmlBUWYwby8pZEwhZ0lUW19iS1YvVUc7UCZeZ2YpdTdkImZZTShpJ24xRjBdKTMhM1xjJWxnSWgkXydqOExAWzdxWy9scnJBKzA4RTwjLGNkQkxfVSVzMCEtOy1rWCdOJTpyIUNbXSEhQ1tdISFDW10hIUNbXSEhQ1tdISFDW10hIUNbXSEhQ1tdISFDW10hIUNbYWA/UV03bkomNDpGKj0iakNvKENhcklBLFg8Q0tPK2xgTGlHY2l1TFpxVDlQVHQyZHJQKDQ2KXNQY2c4RVJHXVVhMis3VilKNDNROiZyLVM6XCk/MF0uU3Vxb1IjTDMhLEJWTEMvXTlcXzZTSmo+RidoOio8VjNpYGtQP01xRFlwTDlqRjZjKjJnVlAuQTxdcy9PNzIsYCRPTV1HOzMqdGE+RGYwLl5NOEs4bTNtXms2VGk+RCwhK1xxWDk4Mzo4V0A0S2skQEddNUxaS00lcDhQMV05NzUvdSVvMjhqLllVXiEwRWhHRCVEIydPcTQjbWBvTUlqVydlRDkzMC1jMkQyMExLbE5zP1ZuZUJlQFlYa2xfa0QtcDRCVVU/KTFwV1MnTmA9cjwmIlcxJjlvRyJaMmRPPzorVz9ddUUpK0BiJixRKUVhWWM2KCktLSsybDQuNi9vITBfdVVXPjVlQmkkM1w1PGdXblcnRUM5Ii9IQkU4VW8xLiFvZWJXPnE+JEZEcDhkZ14iW0I4QWRuZm1iTzBPMmA6XSxDPTsqWWlwYFcjcDQ1T21IQz1naWNbO0VhZlVlNS0/cj4iVCM9Pk5mZltKbFYpa25FLiwsVEY+aUpTMWwpXilDbydDN0xwXTtIWyklVCEnXTE3IyZQKXBtKDJQNVRKXiVILFlrQFpsOGJMQ0xdaCxWLk4naDVJLEpqKlU4T2A5MVNxTCRqYU00OmV0Qi4mTUhDS2VdSitiKD1vY2RAVmpjPCEiSFNzQEVEVEk3O2E/THVPYldORDdWRWhlRVxiQSdbLTdpIUAuR11KLClXaW1Yb1c0Tm4hXjFAIzcjbEglJDs7bi5gNy47NGhGKlIqMmZvUTtAaixNakE2JUwna1pJWFRJY1Y6VmttRmUjai10VDlLLTp1ZF4sZCxVMjJkSDc7QzlzNz9JcV1pZGBlX1ZiMlwmLlhxdFREI2VwZF5zQHEyZm1kWihrREhFLGlhJ0tHR0hyPWNwW2pKNXJyPjFbKXUrXyRRZ1Q4Vj9fMTlpMnNmbCMvKy5YYGApal8wOWVLIi1lLzFqQXJTPCFiPFI5SChVcmQ8SCpmO0FHKz1OdEEhJT1TISElPVMhISU9UyEhJT1TISElPVMhISU9UyEhJT1TOlxYamFFSCM+NkdOWWlzLSxhKF43PD41ayk4YDBTL2JsRGNLJ21zcTxpLDkiSEheSCkuam8rIyNbJmNjZHEmKS4zbTgvIUpTVkJGPT9QW0JYW2kxUi1GYVxUYVJycmooOWU1VD1cXyooYyIrY1YyOSdYLD9wdGsmTzR0KWBrMVdRQF1xbiJAbT08QXRHMTJvNS5gLDdfYiUkNzNuZzRvJC9RJUZNbTMjbkE6bT9CUk9AaCk6MW5ZQHBFQkxHRlVwV200OVdNbFBBJEYrR2NBMzY5NnJjSD4uTjNBOCEzQDsrdTZFIW0kIWU6N04oYFdsZC1pZkheYWUvVjg6J1csTD5NQjkoVDlmLUFWZCFBXWBvY0NfITBwWlohZkFHcmA2dUA5VmZWKWYlOTRzcTwrTUgwImZQNjk2J2gwMC5WTjluUDctIVFvcjA+PlU1Rj1xNEslOVxIQ2c/JGIqamkpUDZXJS5lQ0QnR2RRVUlOaFBSM0QjVTZeOiM6IjZdMipEWE0hQ11YJCZrVUppNFxsZiU0I0oiaSdDNytLUHJWXi9BUT1RWydyNnNdVDYzQ19bM1lmYk1jaVdmOmQpcHVySmpaUXI5RjRwIURpJmhvW0VnPypNX3Qub1tFZz8qTlBFJCJbQjhBZG5mbWJRdShZQjE/LExiNVQuZ14tcC5MZTZXI1tYXF9OLERtdSNcakoyLThpPSxlPGpXJzlrVmZxSjpyWU5uRmZCVzdmOU9aUkcmbS40JyMiQiVOKlNRPydHRUUpJi1GUUlza21GSlhYVEY/LHM6MXQ4OkVcUUBFVzZHRmBmOVEiQyE+Um1gWkg4OUUudDlkYzpJUDdvXGhaMXEoYzlzc09WVT43X2h1ZDMjKSVzK1ZrS2FoV1hGYCkwP2FuRnE6LCU1IyInaD8uYDJCZTxnQ1RJPFYwX0hlb045QC5gMkJjIWBeMj9JQ1hVQ2JNN0REbDlZTGc0R2otW1U4UFNYYiRcPD1UQDBDKiNqLXRUOUstOnVkXidmYFl1VlxjW0hiSGQ1JThELG8uVERwKT4kY3AhLkJMaDZmS0trLUpCRW5sQjhxP2xUUVhgcStVPktNMVhhaSxpRjY4JW1NSVIoJFYiUUl0QmRXSGY2JVo9bUdqMWE6KGZIZDQ9U3RgS0BfaWkvQTQuaThFT1I1ZC5acDQwMlYxSzB1b29bLS09Xkc3ciZkK0kxOFFDXz9nUE9ARkk7TVI7ZT08XSJLYU1JX0RUOypZOiE7Klk6ITsqWTohOypZOiE7Klk6ITsqWTswRHNdTEQzT0hJUGY+Q2QubmpSVktMMjQ0YTw7aUdTJC5HIiYpYFN1ISNVOWRiZVl1bTBsKzIjZnAkQThNWGZQNVJZSShhZjplTWM8OiZtRi1pQkoycXBEdGRSN1xkKGtZL3I8WC9lXUInQkVmJighNycrJTFRSEk9YnBiRUJOK3NjOFRYJWQ4XVwrdWZraUM8ViEiOT5ANztGITMmQk9bLi1EbUY7UG5eaWE/RGBtaD1bVFRFYFoxU0FlLF9aZExuYjtBNT9gSUw6XVhYNmk3aiktV1RZZl4zLi9kJV9yWTdWWm1ZcEtNS0VPWzMpcHNGIWxHW0RwZzBOO1YuaURXKT9qIVcmS20mN08ycCtMNVFxaiVYJzojKUdtRE9GSEkpXnRnREBhbCQwZzZxalxWcmw3S0I5WkotbWAqOS8nP2AtRWIxIidGJ1kxXWZRUSRZOCtba0s4bHFzQz8vRlsqWSgrZldNdWhoIWZBSUBYa2xfa0QtcDQsJkM6RyoiLVpnN2RQVyspPVQyPC88JSxWNiNJJ2owZVtMZnU2NkY3KkdkRUtsV11xRUtVND1bIyxFPzx0a3RDXydxSiNzME5uKTkjIWhcLFtsKTRNQjlgI2ckV1ZQKkAtaikwWGFwKEhbX2paQzVWW05ocEw6L046JG8jSS9rXCgmQk1VP2NRZkdrP3VlNV1YZz5yYzheSFpidGUuT2VhczU0SERdKkdTYisiJDBYZjowNlUiaC5kO0xXJGYjVjEwPFJVa09rSlZsOVlMZzRHbktcLEFoRlE5cVZocCg6YTE3bDJCPjg+ODonJGhmYDxcbzYyN18hRDhLPTE2bDowQmtYLkpiRDhoZGxETD5TWCdMckZRIW9iaS9uZ1wkX2ZZNm5CRT1CKWw0NV5oP2JTYS5Zc2VZJmQ4b15FXz1KQFtITip1KTwxakgsTEkvLGllbiEwcVVhZ2pZPjFLUShpVVteKkkpR1hOVEZDKjZVND4mZytuRk4yTy1SSVBZP0ksWixgSnBVaGNlMkdLN2giNSFrbXBuQEldbDdsQj9IanJjb1I9aT5RSjhAUnVNSmI7cTlyIyRlVl8hKVZUYk5IZCRXZHIwK1xoKyN1bGIiak1QZWxBLmRnKUZoLCJcb1I1IjpoZGRANVcsdSg1Zy0kRFNMLExUKnNvO2VZO0RqbU5DVUg6UjlxdGRqLEBoQClGdGUpJnVdJUJQJXJVNzAiJCE3MCIkITcwIiQhNzAiJCE3MCIkITcwJVRMbTRJPSFkQ111MlI7NSRQRmZTMHMwSDVXXSdQOiNtaSsvNSlLQE83XiVsakFLXWVCKTllaiRSVi1zb0gpIkhfbTw3cVdkWEYuPF4rKSEoVjJoOjIpOmdnX0pZUlQpR3AoO1dvJmBbJG9SY3VOa05eTEVbQS9fdUMwUT4hIk0hLjZNaCxSYEFBZF45JlQ/dVJUdEptaGcuO28jR1UhKVQ+biEtTEQkPGlkT2gpJVQkS3FUb0RVT0BGZGtqNm9kPE0/Iy5yZE46JXI4J0hIWUM5KHRZUCJgKyZZOXBWaSEyPj91MHB1UFo1PGhhP1JhTVouSF1PODFwR0lEXjwlPFQhSjE1LjNWLF0oXzwrTUZfI3Jpb25kXkZmc1I2USlscnI8QisvYEA5cFd1ZS44VTVBcSJuTzJyP1BdPnU3PDBtNz8/XlI/Om87cjBtV1lJdSdURXE6JDhGVVcwXWhNM2knRUQhLzc7aFsoaihlRlpbaFo4YDM/KyRZVEYodUVeWU1lN0ZLJjxoO3EpIUlSYUlqWy40cFwmYmhzUk9SVTw9TGRuZm1iWSMuRnVOS005KGkxRyFfQ0lwZU9DT0hZKjsqWiFwJztmdCYhLWRnKFhiciEsLEVvLmNxTWxzKzE1X1otPSYpaVsqbzFRPCEvYWtrOlY4QjA3cDtaRSVpOFBSZTVpK2AhL3FzZiErXHItRENwX0lhaWFJKzxHRE1vQlUyVzhGbU9OLDJGTTY2V3Qmb0tVUkVLbzBccSd0OGNbJi9RJ0E8YUA9ZnBWIWhKQm9vJElePmhyQF0lPl8jOVMsLXUvcm50YSh1VmlhNFY8KidZPEEmZlAjKU8/NlxgdXAiZV80biY9Nmt0P1FpOikzJzxlKGRIMTZsOjBDRlZfLGFOQWoxWzhhbyUuTzYkKSNPK0pmVzFvLkxjKzh0WlBpLXFlT1xqVl9sPkROKEZscCRvITNIKF1fVDNSOURzKDo9JUZUMEddZ2o4czFNRU0/ITtccVI8cS5dZEI8JDJvbEAlUSZgU0k3L2AuVEtOIS5PLS5gPFtIKG0hN2I4ckVnJV4vKFFxaElOaUdBamt1LlZcbGJlbEYrZCpGclMrUzsockVtKVNkJTQ3Xj5sOE4mZGclXVIzPiE1Ol1YISE6XVghITpdWCEhOl1YR0tjT0kiaFtoZ2c/JGtYWUc4TC5dRE0/Wld0bixPSGpVb2xaOi1EZ1spbkB1bmMqYG5pRmVEImlyW2lUTiREVSZiZXE4W2ttTmpLNWlaVm5LSGU/cDZybGUrRFRYL1Q5Oj9ZRWBqYDBOQSYlJEdwOkg3NWw+IWsiLzZVOUBmMTxjLEY2U0gvPy1DLz1xIidfaUpkYT4nOTQ6XjMuVVo4R3VUOlNOXkgubytiVTZETTpvYEZoVE5WKyZCaTRQJG4/J04lSlxcXmMiOmlkYGo7LDcrVz1nUVBSYDcwIidPYiEhI3UsRjg9Lzc5JFNzKkQrNGMtamZxcCM4QDBGOypZOFMlU1pxLFpBVSpTQERNLiNYNDU1OzdpSj5uOlM3Y2NbdHIzJWtiRjtVLmF0a183MlFtO08hXUImPD01RiE/al4nY1RFIyRnIzo/V1lnNGY/dV8qNEVELSdVQTFAcydwPD5HKSVULklmZ1NbTVNIXEovTTZUIkhVcio0XGxmPS5zLWdXKWs1QCxlLGAhU2dIUkpCKm8sNVlgVyNwNDVPbUk8NzAkMiMtTjRlZGxidTljbnUpITxIQiljOU0/KFxrWyxsaWFxbmlaZ0ZmSTc3ZDJtUjNkIyVnXFgzWVVmRWsjMExGXmc0LmFDUWo/PUNAIllkKD4oVzohPDl0b3JSdWk2My5vY01VL2toYiRcPD1UQDEpXFArW3BFVD5UQjUxOHBtdDtGMFMtVTQ9XyJgS0I6MmpFOjwhLmJBJkYmOixCSi5SYmNQVm00MkAyUEleQ2JfWTIpX2lba3A1VCcsbGs9cSxGcCc2SWQhKFNrVDhCVVxvb3JQYVdYTGpiUDQtK2Q5IkVgPDIzXG07ZSdeQChLKi5lWTIjKVxgNkcwXF9XI0ZeTyMmVis3VGtdajFwO1FOamojOE9GRlt1N1w8aXJKV3UhWkVKXUoyLy1nXS5bRC87SDNDajctKzJwQydqcWttZ2ZIYU5OSUZVNkldU1dOcDp0TC4lWS1PREFsZlVia28kUylmUXBBK0hHIkFJPTYyNjIvNks5cGc0Mz5RMCYjR0JBSDohXTY4U0dPWTYhMU83ZyQnNUJmOVsuTzwrLjhncEY0Sj4ub0whMj4/ISEyPj8hITI+PyEhM1twT1YwK0dxciVGWiFiNEBqKS90b2AwXSxrOGJRWmIrMHFRKzFmXXEzaz9XRXFJWjw7dXM/NGsnRTJsbVglVU1PS2FdQ05KVGAuJipCXVQjbCU1NShLKkxXWVFdQk84SF1OPTZLWGBtJCpwU29FPFlZQiNGUmVyckA5QC1qJz5dOypZZkouNVFWPyQqPiw+QEsqZTohNSY0RklYaGNvYlMrcmtHMClUTj1nN28rPl50VDAhIiZfQDcyL1EkZXE1bWhgXiZbbldlSDYpajhTTkI8VmNcRj49SUAvakNBYTguXk5SX1xHbFFAclksQl5NQz4sKC9edW8oJW51LG4uWVdaU2o4U05CPFZjXEVuPkRbKFlIOVJdPTk3UyxBWTlGaCEmLUFIWnInJ3FNSSIqJjtkLDsrTjw1MF1oUGpWLUI/QktxLm1lYW4uJik1IS4mKTUhLiYpNSE3U3E2LUwtX1oxSjI0IVxgP0ExVXFVNnFOVEVcNmUzPkdHQiRJJCk/N2trKz5qQXFnTGUsW14qXkdHc2hNQz4sK2xkWkEnYTcwU2YnbSE0TyExJitxb1chITU8ZGpQdT91YVw9WFU6dSlKJzEnc3FHNz5WLiYpNT8/XTdTZTNmXlVPWSVmJ0xjZ2giIjo0TlxGSUxoZ0RZbydQNzpKaCZrUUBGdGZURixkPDcwJDM3J2AhWEJMckVBcFJZVWdJci10UEFURTsoVyRAS2cxYCsjb000W10zT3JdZWhdLkZDUXUhQ29zblNLJCdncjtMaD5ZJWYnTGNnaCIiOjROXUo/aFI6Rl1cYTY4ZzBeLCtaWCJtJ1MlSi03V09IYiJgXVRkUzRSVlRzSVY+cFleTFdFJFJmPEJUZSxLRGA7aV1rJ2EzYUhVNzlRIVQ3MixgITcyLGAhNzIsYCE3MixgJ05JS0RCbmtYQi0hO2QqbnJyQWRqWUBYbXJyTG9tPURoUF4+YjduamBdRm1XVlRUakBUKEciXW1aT0RsNE5xPkpoW2x1aklNQ1VKTGMlbC9VcnBUVl5xVFo+b20waUJUal1ZVWA8TFhObGE4T29iV21yXHAhb1lzN0diPkwsLiYpNUNmUkwlZ21mKjlAP2BfRksiaTpyRlhaP0czYElUKE1wS0ZhdWc5PWAsVDNQMXNTSjRwZCgrX3VpaTplJydUaWxRYFtXRl8uWFwmUkNgSkZZRCpvZD0mZSk1WTtYKitgOiE3ZGckLWolQUchQnJZOS5tZ09PQFpJTk8qN2gmMk4vZz0sL1BmcDBTLkFGYjVzZ2ExJl8oa2UpXGMzcUU/bzs6XWZwcm5aW0okcm9QUTBPWjBNOmhpXW4qaXEjK2stYm5PIz8iVmFnISJWYWchIlZhb3AnKnNyVE8kUSNHWU1WKT1yb2dCMyZrVTQrZDZJazRlL1JSPm9HUlovNUYjTWAnRz5eJUNGVmgwOEJjRy0iKStFZCEyWlZKZ2wncXJlT2wiZHBXVVtlNi1WbmIiXUVoVWFxIUdZWTFASU1uIXJGNG5OW1o1NzIsYnE6YTdBTU4xLV9FaFI3JkFjaUhzPiFFP0guMURvVCo/KipxYyMoMV8qOl4pLm5VND1dWCs3ZGJKcmZwNls/UCRrY2xuRTFmISM4OityckFAN083XUs8VDcwOyM0ZExVS2Q3ImBNOkpoJmtRQEZ0ZldjX3FPVC9CLFVbOUEoZnFBXS0hcnJBSWpyblRnNFs9JVJRO0xaY002RzxXUi9mI2tSbiM4LV4rQW9cN0BaNzY1VztzNzk0KVI2aGoxKHFqbTUuWy89ZFcmVCdFRCEhJ0VEISEnRUQhISdFRC9NTyM0O3JdRzdVNmQ5QitgNGlOWWIkcj0+QTAlOHFcbUshZChKcEl0PUM+R1Y3NTxQbUhoXTpvNGlLImdqZyxnajovVClHOG8sMV0iLFArQ0NZOEpgZnA/VShJWD1ESERGRE1eXUEnYmQmPi1bQmsjMl1iL0g/WiJnLjhkT2JbcDBwJDsqWic3PCZVcW8ibmBpUlJYYyxUV3MwUzFjImVhOiE/RFwuT11pTXJcZjtjbGEnJkpKNVU3PjAlMjtWQ10hLGBTM1lAZmFYJ2tgaUxcUS0wQzRIWkFNPiwjbGw3ND9kPUBuNiVTcWlJJFRGOTdINzAlJSphbFl1SEVsM04uPGI4WVA8MSxzbW43dFErN1JuWVEoOV5rNlxUVCRwZSowaEc8Sm4ibDMkTmwxa2J0V0YnJCRTJkc4MlwwOWt1XFBwaF06W0lEK3I3JjRULzZaNzhzKEJUTW5TZGtoKic3N1MmaytTZWVzU2EmZklaUEQ0SSI4cCdnXWlwR0Boa0xWVipcMCInITgrJE8nb0pOXCtUISgkUmpcLitKJ05SJUMsX0c4cW9mKjVYTiNGJV1ZcmpbZFNMK0hEW0dEWEphLlIzO0ZybDJST0ZnMU1JX2wkQGtQUHMpPUNbJyhGbTJGSi9ybnBGMFE3dTNoS1RYNzIsYCQoTlQ9a2ktamJHPDBGYk4kUW06Q1pRc15WYjsmLjApYXRIOyIiJiItQVZoO2xUM0JBX1BFWCtoKFInLSpbODRyW1hdTS5zT2JjaCprVyxLPlFoIlFRQSNcUGYtaiNrbUFoODdsUlMjISQhalpCU25oWUAvbW9TcyJBMF9ZZWBGaSFKNzI2UVxtIkxMTEs6MmVkU2JMOk9mVWFPVjsqWTpyZ3BaSiZxcjR0b0k/Q2peJEhmIkNNQ0JFcFdGTzlgY2oiQDkjK2BqLmBDMyc8Uz1XRmghKkBrMiFWRWhLXih0Qz0yNy48dUUwIyw8RzMyJ1g9V049YDlSQWhrISFCWVtqLi8qTmomNEJEQ2kjbTxEUV1nPEBTT1tfM3ROKjpuMW1RIz9bUU91Rj8ybU5AQV9kOU48UGxjRzREcW0oK1AxVSc3XjorNFUiZVZPYGxVMVdaV15hTT8jJyFNPyMnIU0/IychTT8jJyFNPypJJXA3cS0rZm0nNz9gIjU0bT5zXVxLZE9zU1dvR0FPUl9XPFwrIVUhcjRFKFRSTHFjaSk2TDApPlkmJSpvZjhLUjxRJUhYT0opOyorTCxVY0pZOS49RT9wVG9IOllEUic/WzRYKnRYLU86alBQdF9ibC1bJiU3OkZvNDdeV3FmNk5CVkRicS9vdVleQXU8U2UiVyE/YFxBcjgwYihxWzo9MiVDO1teYjUsUGBPYkVRUThWaDdnbjVUOkQ6KDZcS1VpO01jcWVGV2I5QTItVWxJVTlGXFViRHBuNE91cipaQzsqQkEmN0YvJ0VOQi04MyVZLi4laCMyR3NucSNOU1ZRSD1dITFLSURfWXA8ZzdMLStEIVozIjciRj1gblZocGptN0NGWFY6ZkA3OF5KJmdPdFtkXW9UIXEiOy1kO1RFY1xzKjJ0KDNLR1AiRSE6XXVRU09FTnA7LGVhT0FcYGVfSE09SVs4czBeTG9CRyteLFFyYV5fNWUvUlxyOD51NT9iNlohLC80WTojKWBCJ2U2ZihoLWI2ZENGNG89ZlY1Wk9mZ1peRCVxQThwYW87PygrN2wtNz4iMm5wLzNrOT1aQWFnXSUuJEtYMXRoclhIXkwtYTJHITBhXVUrUyVOLEE7T2VRT0AkLGRHTio6VDooR0E8SktSMCMxOWNsNyZUNExITiVTPE1kPlVMcktcIWxXJE0lalJRc2JkUl9lRT1RZUdlUm1lIms8RDBCUFxPYiZraCJqbGhFV0ZpK2FtUiRGOl1YISFONThLIiohJjs2USxJPzxyWjpgdWxzN2RuO2M2am9BcSQrRWNyPHNFOys0S3VScWhiNkdzLVNTIWskN2RDbWNBZUUlMz1jVEU7JnVhZ3Qyc25BIThOY1I0dHFEWidgTVAiRWRWY2lIUUxOJ2ArbDYtVEMvXk8tMk1ITGJnQTNfKHFyYl43ZlAhMzRZc1tOTj9BWCM2NWAtXmNELlZhOXNKI2pBIj8hOyslWm8+PUEtSHBrPE9PcTA9ZzlFK3ViUj8kMi1PN2JhTXIqL1srJmkoJzFpczRwI25wZj8pX15oSlYlPFhbLzdENzcvY0Arb3Q8W0ImJShhZkZ1XFxlRCYsVFQsU11qZSlxJSw5OFtVNUVDZS4mKTUhLiYpNSEuJik1IS4mKTUhLiYpNSFwdCtQdUtEdHIxJyhOcl1malhJRF1nRl9aXTJvOSs1PE5FXydRJWBGMVBLQWM+NUtlWjpRMGAuOkUwKCQ4MEppIy9HRUNQME5IOlU7dTw6bihnI1c6N2oxSUxnX0E7WVNXQVxCVTVGUmltPV5tKyk8czQoOSIucS9gPmdaKydyX2snJjI9JDFWdWNSI2M8WlRMNUJYXy48VHAoYk1DUSQwaEk+a2dtaUQ/cT1lSCM7K2M4UCZvKEIrQUAtQUpTKVRldFxWRDE3QHElJFgvZFw7Zzc3Um5ZZ0oxb1glLFFTa1FPNExEYDMkXUsoJTs4c04jbVN1PnJyQVNpPUpzJWU3LzovW2EvcStTITdkKFs2ayN1Tkk6VUBiKWhxOzk/XDc2SiEkMzYxSjElPWhcN2lEO142Sy1BIU4/ZDQrU2Vlc1NhJmhmIkc7aVFYImRuY2knNUZLSGREcm0hP2dIQkMsa0A5OikxPjMyJ2k1clFWbnNHNlt1ZE0nKEhMaDtFbj9bNzAlJ1JuTSYlLHItNSxrI2Z1KC03MixkLTc6XzVwJGpVMChbKF5AS28/bVI8M1dSXilaRm5qVGtHLyN1YW9LcEk3S3VNaGksX2FZaVhHMlhPNXFkRSdFTVkxakJ0NmlPKURAMVAvZitGNSxPMmMhMj5sLFc/OiMqLlxzUCxuSksoNzRfT29QT3Q6KXFeZjtpTz4ia3NvWDhNN24tJnUpakk4KENVOyszbzFiN05qJmxtTXApQCZkQGkhM0ZxM04zMjw9VFZmbV85JWUtdSQ9czJPOyxIJUEsJSJBNiJUVD5QI2FhKSY2IToiSEVkOUxDYEwqdE9QPVwiQytXcTJiIllFUV9UNl0oRWo7aVpuIShWI1hRMU5CbiEpdW9wNVF0JyJRXyxnTioxRUpdOyVlQWNIPCtgKlM9V0ZUJ04lRUYnaF45cydFSkJ1UmosWjVnalUhMTpSWFglS29iP1s5VjtIdURoZkFMUyZSV0dZZ09hLyNUYGlkUjFoZnNLbUBhMCYuVW0jOEIwZGdISWpyWz1GU1EwI1l1ISs+ckJnMVNQTj1EQS0lcmtQNk9URFg+NTZEPFIyb2I1bGUpPy51Q2taWlldaCdbZGRTVjczIiFMSmlNZU02RTJGTiEhMGs4RUpmcDouYTViZS4lZ1ghLiVnWCEuJWdYIS4lZ1ghLiVnWCEuJWdYIS4laCo8cnI/YVQhNEpBczJpPXVAQTg8Xjlycj5lbk5DJGptXl5uSUZGLkFDV3AyWTMzPSwwbEAjLigvWkNLYiNoU1o6RjdGXyxOXS0mTUlQcmE6QTEjaWxPJmpCJz04Jz4sISppL1xMRkFUOEU+OlIwVyJEQCwpRU1gYk8jIzRNbSwwSkllOTVxc1dpPWlmK0RaWyM/JGNHUzhnaFAkWys3XnNTIk5eWU5zW0NGdEVPU2xlUVYtXWV1PFt0cU1pLzVzbFBZMydCaDp1JUIzXUNhLTE3aS5dPilKPVg8YEk2N21RRSRsITNwQltAbG1uWnJgKz1XN1JuWi4uVmo9YCxEMi9OUFFAVUcsVE1nUjInI3RIK2lwUVgiajs3ZEo/a2JuMnUocS01b0NaImFKa2lCQlhtP0FQUUBVTDdoaHBOcStqMjBYW3RibitoRDRDcmFHLUxZIWpnMjUjXWUqSEhWcm8lUyRfUjJDUFslWTIpUGFEQkd1YTk4SzU4WV5JI3IhQiFGZ25nP21kb0s6V0Y6Xis1PTVLOkhvV0t1Zm4zQDAtS1pgJ04rOydJYTNccyk9ZTUtYT1FJT5sWWRjJy8tUTVOYlArLWlFVWRjQEBjY1hLT05YcTw3aFlTTTY0JTpGOlRMUkZQJU1QVE9zRDI5XF5jUmo8LllaYCdOKU8qRW0/SWhQWEFgMzkpQCplVD8tTT8jJyFVNjljTVdzbmg3QkVEQEpPdDopcV5mPHJaKSJBSHRtV2toLlE4ckRHb2VaXGFDVTFhM2BtTyd0ZVBcdCE0SVJbayFmQ05PLzhMUDJwQFlGYWdwRUpMcSxkQz0iT2wwMSJfMFEyP0dgWSg9UVBBZWVCcFxiJ04tXmo7VHMoYDpxPShrKk4yTSlrPEtOZ1xEPEMucjRVRlk8TUc/Ti4/XzMjJFFtOkNNJmcobWJdcDVCVi5qOWdlJC9KOyJIaEQuL0I9MnInTW5nMDAuLjZRK28rVyxsVl8ibkQ5Pj1zRFdmSEk6XVghIlpmKXU4QzQ3X2MrT1tXMTRQUF1WQW5MIUc2Lk9jYTszQ1spIUAuXklnXF88RyRbQjslTWdxWm0taFxVT2leayEsWEhVZDQuZ2IlSiJFTjk9MyZvXCZJPSMpUSZiK0E+aUI3WVsubjUwNlt1XVpgREktQy0/LWRbUistNkkmISNtZTA9TyJJMydOJU9pNzIvUSE3Mi9RITcyL1EhNzIvUSE3Mi9RITcyL1EhNzIvUSE+Z0w+USNNRkBaX2ZHISNuanMsdC1BJEAjYEAoaW5hJHBuVCNYKEk1XzguLUwnRVJdMU1uQ3BIcGVQLmU5JUlEQFhzPGItUV4hYUc3bWwqLSYqLSJWSmQrKVxhNzB0XilKPihQMUxtQUUuY05SdVhrR0M2IzxnLC1TLilUS0ZzJUNlWUReJU5XVkI3b1QxW1tCbnVhNTVRJ1tgIyVuQiJDOihRRE8hLms+MkBtb2BwPFNMYDtmTFpVdWZfWCxKLjFGaydXN3AkRF9GVCxeYTNxLmYhaSVMalc/QmNPXV4kdV5eamV1JFRGcWApIyhTVFtXY24sPnEuOG1qbEYkc0MsRVk1JU5eZiM2Vl1PXiZJTENqayE1cERhPGNvKVdZc2k8Q0ZOTUd1X3EyUyxNSCNbYlZrNmBWIT9gWC1OWF0tS20/W2tRQEkpZE47KlolXjhzMF5Mb0JHLC1YRGddaiojYkQxVz1zbC0lc2U2J1U4b1RxQ2QpWzdyOUQvJ0A/aHNyQG1DUHIqQnJkJGhsVFk/TlxTJEorLUVTUTpeLHNuNl1LNyhyY0teRzcpbz5LajJHVi01VDdmMWhmWExqVHIxcFMhMG9RQjYxa29tWXNpNUxaQEMxanI5M2BfcnJBWE9xOVQ+SidwW3EncnI+MihvOzhpMDNGWVNTMV1hXSUnUDMoJmdzZzEnOUBfKUFjIjlnPChZXDozUy1FX15taTs7ViI4L1xEOl1vUVVJLXRIMG1GbXNzK1gnPFdKMz9VLC9KU0JEN1xKXS01KF1oLEczdEMkOz0ycWIwJCw8VzFALDBEUUxMSWooYG9UVzxAImltJmw1TCRKLSZAYFlwQjE3LiZLUVtgXFFsYSEnWy1HRkdMcCxcIktiTT8nWVVfMk5MZWZXZmZycWpObiJqUS90NGJqM1ZuRjsrMUkiKjdISDNQJmJtVkwzb1NkWENqLU5mTXM4LWJaVHJ0VEVVS0pPZzwia2hOWl9CVEU7MUxnXihwTWpvNT1HMUAhbjs7RFtvZzUqXGBqIV9HQzdST0c1KjJPQWNtQzZtUnNRIy5odG1ESjpKLGpOR0chIVoiQkoscSRLNVIqNEVoV25AQVtbajchOFRmQiFxXV5rWFoyUXVoUCJGUjM4YDNcJmhbJzMnPlBKRmpPcztwPjIrdTJ0R3F0U2ZRLVJsRUl0YCkqLFw1dSJOWUciUVFmNVdFSkZwLzhBJUMyRCYuPlBDMyE2QE4qZEojJUldUSI3NVNxMjk5I05aLVU1Q0NfJ04lOiEnTiU6ISdOJTohJ04lOiEnTiU6ISdOJTohJ04lOiEnTiU6ISdOJTohKCE/R0NuNCZpK1NJRjA5LEtkTlcvU2ZOZlFcIUombERGXzdoXTdMVUZdOzBCXzEiJCtldS5JaUVkXUhASz9DXWJrI1BlZDwnOzY0Rlo7VUoiOUppR2ViPnUiXUpaUjJaVTo/V2VtUylkalM+KC1MUGEmQTZlUjJpayE5K18mJy1zSl4pUUFaIjFYMmtOLUFISW1gUGRwK1JMRWZLbERNJFBvN1VlWHBNcV8yLkclRmA3NE1UInR1NCJZT1xWP1VmIjRQWHRsZGI6OTlpREJcUCJWbUhbajNcUUxVKmpfcz5TVEYnbWNCNl8iLl40ckFWSjJKTz0tMlhVNDZXLXJFLFRNZ1I9YzJVNSFXSE5uaExJOSsjbVZdLTs4ayJVNSNdZSpIQk5lMGBIS0ZUcnI9Ykdtb0pKOzNCMSgmZCsySjohTzUoKjdyXWYhIU87cj88WzU3VV9sNF46SjFdK1M7akFVTTsrc1BZblszb3Fbc0VIJjlVQE47NSY+ZiZlPm1uP2duLklSPDIrbiIoQEVFc1EyNkIiOWM0ZlleUFRwQGQ2SlcuTClFa3BvYj1mcDh1dSJSOEkqbnAjLyhiOmsvbVcnNFdqOWpjJy8tUTVOYjlNWnJVN3QtaUVVZGNDMyYncFIlSXNSSzFuYSFMKDxyKTVAOXFmQ1EpVC1qKW9AVSckIU9rVUlwbSo6Nk9xLUU1QlgnMFhqSWdhTWsyJy89IV8sYkstTDcwIiQjKl5pZjpeaiMqQDRsUiFeJFwiPEBDNy0/SCs1XkhVS0E9V0pwNWBzQ0oxWEU9OkQmTnI7cUB0Mz1RUEFlZUJwXGInTjY5PkBpOUZrV183UzQmV0A2IWVwbz9xLC9jOCJrV05bPnBGUl5ZcjJdYnBbL2hTNj1IXCksJ0VEISE2VCIkRD88YmNRIkpnX2hASz8nWTdjTkw9LlwmL3FYWz1ZQy5KXSNHSztDPlIkN04nSF5qWlVANEUlNWtBWVItXCZMUj1WLTcqLFdGLGUqPkVfKnRHJnBaVkArOU5FTGRkTT1cO1ZPc3BYZWBQQVw6J0stU1FQbWwrOTlNL24sT2EnLypucEJeQ0JQQiNHbWMuKlI7MzdKNmNIM15gQGc0bz5qMURvalRcJiE0b29UXUZoI2MpYWJCJUU6W3JtX2QtUVppVEc0OXFDJ0omcDxSYk40XVBaZCtoTkZCOywhKEdNQzhKIU1DOEohTUM4SiFNQzhKIU1DOEohTUM4SiFNQzhKIU1DOEohTUM4SiFNQzhKIU1DOEonbVUxZTdoSFA+b1VSREtjYSE+W1JBVF00IyY5bz1YMGlDazYrI1xMQXBeb0JIOXJXQGNhYDItUWRTJExcYE1GWTdFPSdcMiFoWydFR0tbZzNmV1BVbEpublNJRD0xa3IpPCxdV09pWEElKGBYKVFqOkhSVElZPztabkpDLz1LQiUzOFtrW2k+PCNJMzdETWZIcGg0UjpucW8nQ1kjbV1TLSw6PjgsZlZMNGBgTyZdWGoqdWZ0LUxicDtGXD1BS2ArL2EoZTxxS1oqaUIiOS8vUkZOLVRLQGpbM18rXlxuJ2RqYlBJKywnV0U1TjpIaz84L3E/SlEqI1xoMFU4VU0oYkNLVG0wX09tOGlmdGMyLkhmMG4hKFtEJCxEMCNBXTYxbyowX2FtNWtiJkExXDtDNGNNWy5XITtjWiVFLSc6Q1cmM1ZFRDxmM10+TFxUS2snZm9TZnJyQyNqa11pYSxXVGM2cnBLW1FAZTZta2AzPkFoJEFNNSQ1RSIiclU7UVxzPWsjTWBBUlxOOk9CVCZnRnFxMWZVOGBuKG4hJ00iZVhLIVpOQFomNCY9KFY5MTdYWV5HQ1hIOWtDbkw9SHJyPilCZmciWXByY0ExQTc6Z2JNSidVWF9rbyYwLyk0NkorNVQ4LmkrcDNHXiYoXCViVEZFLGUmMy9TRClOPE4iNSNsJz9sQVpKWUFhXlc7ZUg+S0NSWCYsPFQ+UVBITT8jJyFVM1lgcWJDZkhMSjBncWheIzhrbnIoVTdVR29zKCxINEQ+KXIwLC1rPUQtISU8RmlhUE9GU2JQNF9oQT0hInJEcU0ncGcjNzVARk0wcGM4ciFWRkpaPU40V3NXZmwzUGArJm8hb3I9Z1IzRllTUTFdXzMoWko3czgqa2dqRCxiMUgjJ01uZyFGUFtHcTJpJ1MrRSJiWERQIjVdQVAzUGkrI2wuYGVjTkpkNm0yOV9cIU8mQCEpI1BLJ3IkJTZabDpXMXJZJiUiYTh0aHUxX2YhW0o3Ujc4dGM/XTUrMldUYTA+WVdsQUl0alF0WzY4a0pwUE9Acy1WUVY7XCZRViMsQ2pzQ09HZlkiR3JwPVxLMy1OSjJPQSFMbCN0ZChRIy5QRFErQ2RoLGo7JCFQIm5SclAiQCRiPShuWCxgJkRZME1DOSQ1NzIsYCE3MixgITcyLGAhNzIsYCE3MixgITcyLGAhNzIsYCE3MixgITcyLGAhNzIsYCE3MixgITcyLGAhNzIsYCE3MixiQ2JSaVQ3YkFWRzlGJFY4bWpHbFk7WSwjSFclZzNLYS8nIztKbi9rJ0w0UjlgazhjPV10ZmwmNUFYZSExOU5QL2lELlBlUDIjNzRfWzcyRUUlQSlXSWRwYCUtbSVfKnNpZkxbJWRwLic2SWNOS2NIMF1SW1M7S2VRZzM/VkJaP19LRDQ2Wm08IV4hJz91Iks1Z24zPj02W09iKmokJjRbU0AqcUFGL0kxb2BTWTVDLilwLSYiWV1VVGJHRzU3LlZvb0NBc2Iya2wuLHRqKGU4JzpIKjYtLyE5Py9sSE40dCxvYDRQSU47LWVPXjtJYitUNWBJUGNsJmlpM00kdVpKSkg9bkc0KU5vcztccmVzIkU7LUNmaCskNEBWciJjRFRGR2otJSZqQVVNSFwpJkFjJlB1STE4cjxFXEg6ZSYnQkRaLiZ0QzUpPmkpb19QVG06cnAnW0RYVDFubjw5NltWZltRc0MuY11bNCpKZ1ktVEY1T11FVXQ7I2ZdJlxDRUtjJGJIXV84VVRGRWNnTTJoXCFhLDRodSh1XGFsb0VNViJURkhjLypoOUNVMFdgJzopP0E/X1pGbmpUa0cvI3VIKlZxRzgsVlFRPGY1JmtBSClZJE84NzNBKkpQSGFPJFtMXj4rM2E6RTZQIVBSYFY6UzF0bTJAWCxrL2VAcFIiYClrNiVBNSlLP0tmO0cxPW9IX3EnRlhdRWFeSGtbbjVSUGZdcFIlSXNSUyMkMWxHJVVwY2AqUUI7LHU/PCtqY1BPJEElWGNyUDA2QlRGOFxnMTNhTkFncixjWCspN0o+NDhuOmheS1BJUz1IYCgrK2BPNDJYXUhkUWI3W1VNVTVBcSFZKHNtLiRMbnBpcjU1MUE7cixKODZWRV0pMExkaDBmUy8vUSIxTDssYzdyWW1pL2NSYzpVQWVxaXNXV2gkK14nOTcoJFdlJmJoJjZfbV1lRilfYVEiMFZMIlJdLGgoNU5zazkmLkQwRzUiJj5IXTdKbDBII3ApQVdGLj1gQ0J1V11oMEtIPWNuNDJqQlZxTElJblYsbG9LXFpTLVUwPWxuI2xETitpUy9zXk5MMWlMUXJnYjJwLDhAVlM5Qz9EWDs3LCxrQD84OSw9VF4iaUM8dHFQUEVbY1sxWmAlcUwrQCNScUViPVNTSkQqWEVpSi0mVyJoVDhOOVNfYVgkakNAWXVVdCdOJTohJ04lOiEnTiU6ISdOJTohJ04lOiEnTiU6ISdOJTohJ04lOiEnTiU6ISdOJTohJ04lOiEnTiU6ISdOJTohJ04lOiEnTiU6ISdOJTohJ04lOiEnTiU6ISd1RzQtaUNBUjY7KFZHWEg/XCVcVldGdF5TJyNicURDZTorYlhqZyw7R01RLTEjOjVCY14rSyVxYFhfK18mP1Nkcm1Pbjo1Xl4hXkI5ZWptI1orKWQhSj9RcV5FIyxsSU5cLkpaL09HdS1YPitRbHMuL3MpNUFbZSdmXiZpZEQzaWI4SzxkcHFyNEJdSmZDYjlEPTFrbkJJLSJjT2lYNV1lO09yKWkuPHItL2xEM15UJSRpb14qV1AtaTY/RHU8TnFaXFNYX0stVmA5SkQoRTdOLzpfJjA7Ni0uPnMzVi81V3AyW2M+biI9SUM5cG5jL0Rka0hmTy45Zk5oNzg6Q21YVFJGRksrQTNrIXNzTD8nX1xgXlcqaVxRMWhCaz9WMERDRHFTKXBpdSQnaFU+KCJnYGQsVGw+XHRbP1VzXlhIRjZXIWdYa1xPSCRJckk/ITRvWTc1O0VkNU5iUmcnJmFFIWU3OygiNSlOLV5PMSooaWMuRV5yNUZiLlQsWEk6Tz5AWiY0KCNvdUpNZkZMNVwiJ1VUKW80N2skU3JgXXBrL21XJzRXajlnJTliODRjJy8tUTVOYlJKRVxMZFRxVG9HUyw7O3VcKzppTnInTW8iLVJQNkwmSWZsLUw+c25vI1wnUy91J0VOP1s9ODVVYVk4JiFfM1I2L081PD5vOCEoYlNdaC1CcSE8LTF1JiJWb1IkNTdda1xZQT83O0pVSSIjNj1jQm1ubWNjJF8sbGg4W1cyWWlqRSZiXysyZSpZWmFSLF9EcnRpKGBNVDBsTHJnPmMpaG5LVlI5dTNaTlgqXi8qZFFlL2JaQDtpPFIhJGRlOS0rbVwnZihGbiMnLD8xajc2UVg7PCFpS2BwRV0lL1lxWWEyQG9XIjIjTUk+Xj1lJmg8TCJAKjxsKU9QbVgmW2UtWyQ2MSlNXSlxV0g5YHFccjZmYzkiYF1lZEcsUW88SzJYJlllP0xFMi51SThjMz42N0VnLmVpTklicS4rRE8sPiszbzFLNl5LK2lkI09RK2RHbWsrSihUNEdVRkxmbG9sJFYvYEE4Yy1tJWcmcWQwKFlDJSRMXSxkLFB1P1pVKyo1W19OQ1dQSFFPOyw1MyVZYkkiKExhXSFUISU9UyEhJT1TISElPVMhISU9UyEhJT1TISElPVMhISU9UyEhJT1TISElPVMhISU9UyEhJT1TISElPVMhISU9UyEhJT1TISElPVMhISU9UyEhJT1TISElPVMhISU9UyEhJT1TISElPVMhISU9UyEhJU87OFYubllzXSVjTiQoNzNBdU0mJjE/PGBLVFwxJzdTNkpqdDE1Pyh1ai8lOzRXISEubSgwXFd1ZVhtQUhAMXEzSTErK3U/XC9QbF1NQ2xoPj9vLFROOTQyMU88JjhYSVUhYTRJTXNFTSMmUzsnajZNUilbc0xuKj9MKFItMzsoVTwlT2tiUEkiXGxmJmNNLFtFSzVkViNzKWZkLF1OU0ZBPiIkR15fVGldYiJzWSVIa1RUOHQvKlE4bk1dazxzP2svOWMmZUUiQ2VFUy9gVF9KOjBcZFopRk1BTFduKSEvcG1jXGxbK0lzUEpdSCdHaGYmMm0sVzo3KixzJStAST1GLFs6OEY0PGhsSHEvXFw+cUdATl1XT15rcVVVMTFZWCs+PSQ8IkQ/Qj1rUkE2OjZeW2ZCVTsnJzIkS283Xik3bT5EaW9lNEoxdDBWMDhMMEo9LT4tZS44TDhDSzRRX1okbyxlNGI/WmxBS19AUFRpcUEmV1VyIm0/UCE2ITpiISFrZkJyckQ3YWQoZidXKF1PSUs3anJGIyQ7ay9RcnJCbkhpQlIvUm9JcCtZYFcjcVZkSmoxUDVEOSU6a1o/LUduNlsiMyEjJWpORXV0YGhOQllBTjtTOCU9Ojo2XF1sOmdRISNnQT1dIklwbiRodVxCOHI8OHBVOyEncVRyckBdb2BMbGNRbGJFM0pRaUAmQlkpRThuXlE2Lm4iOS9AYlFOJHNfRWtdXGpOX3NqPi9fYmEiaEJtI29RS001cFVPXWllNEU9J1xYLkRqW0oubXNyKT4rYHBCalwzLFNKQiUjWGw6OzNRbzVNVEQvUVIzQ2xWLkNFKDJZJzQtIlJLaFBkP3BLOi88TFVPM2dHN1tmWHRvWFFXUUpiU3VsRjFXNU1aOFdtTCNqbVZdK0VPLHFnWl1VdFBHPEU8Zl9TbTVMUmpKXm0nYy1vcis/byQjJyNrJlJhSWsjS2xFY0Qta0s2RSdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRUQhISdFRCEhJ0VEISEnRVM2ZX4+ZW5kc3RyZWFtCmVuZG9iago5IDAgb2JqCjw8Ci9Db250ZW50cyAxOSAwIFIgL01lZGlhQm94IFsgMCAwIDQxOS41Mjc2IDU5NS4yNzU2IF0gL1BhcmVudCAxNiAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXSAvWE9iamVjdCA8PAovRm9ybVhvYi43MjFjNmM3ZWUxNDNkYWJmMzgwMTFlZGI3YTJmYTYyOSA4IDAgUgo+Pgo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKMTAgMCBvYmoKPDwKL0NvbnRlbnRzIDIwIDAgUiAvTWVkaWFCb3ggWyAwIDAgNDE5LjUyNzYgNTk1LjI3NTYgXSAvUGFyZW50IDE2IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iagoxMSAwIG9iago8PAovT3V0bGluZXMgMTMgMCBSIC9QYWdlTW9kZSAvVXNlTm9uZSAvUGFnZXMgMTYgMCBSIC9UeXBlIC9DYXRhbG9nCj4+CmVuZG9iagoxMiAwIG9iago8PAovQXV0aG9yIChMZXdpcyBDYXJyb2xsKSAvQ3JlYXRpb25EYXRlIChEOjIwMjYxMDI5MTEwNzM3KzAwJzAwJykgL0NyZWF0b3IgKFwodW5zcGVjaWZpZWRcKSkgL0tleXdvcmRzICgpIC9Nb2REYXRlIChEOjIwMjYxMDI5MTEwNzM3KzAwJzAwJykgL1Byb2R1Y2VyIChSZXBvcnRMYWIgUERGIExpYnJhcnkgLSBcKG9wZW5zb3VyY2VcKSkgCiAgL1N1YmplY3QgKFwodW5zcGVjaWZpZWRcKSkgL1RpdGxlIChBbGljZSdzIEFkdmVudHVyZXMgaW4gV29uZGVybGFuZCkgL1RyYXBwZWQgL0ZhbHNlCj4+CmVuZG9iagoxMyAwIG9iago8PAovQ291bnQgMiAvRmlyc3QgMTQgMCBSIC9MYXN0IDE1IDAgUiAvVHlwZSAvT3V0bGluZXMKPj4KZW5kb2JqCjE0IDAgb2JqCjw8Ci9EZXN0IFsgNyAwIFIgL0ZpdCBdIC9OZXh0IDE1IDAgUiAvUGFyZW50IDEzIDAgUiAvVGl0bGUgKENoYXB0ZXIgSS4gRG93biB0aGUgUmFiYml0LUhvbGUpCj4+CmVuZG9iagoxNSAwIG9iago8PAovRGVzdCBbIDEwIDAgUiAvRml0IF0gL1BhcmVudCAxMyAwIFIgL1ByZXYgMTQgMCBSIC9UaXRsZSAoQ2hhcHRlciBJSS4gVGhlIFBvb2wgb2YgVGVhcnMpCj4+CmVuZG9iagoxNiAwIG9iago8PAovQ291bnQgNCAvS2lkcyBbIDUgMCBSIDcgMCBSIDkgMCBSIDEwIDAgUiBdIC9UeXBlIC9QYWdlcwo+PgplbmRvYmoKMTcgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggMzM5Cj4+CnN0cmVhbQpHYXNKTDkyRUdaJjs5TkonbSZDWUM6bj9GRlkhZW5daTgrbiokbTM/amo/LD9yZEM7dTcmaVdpPWtfJ0VIRzE4S29ULiJbZj4qVGRqIiNadGpvRWdyX3NIbCVKbD1wdTE1cG90J2YhKFM2cVUpS10zdFoyNWNKOStTLHReUmgrLUJUQlE7UThWWTY7YTonTz9LKUtJNVNNKCVvcjtyRGgnUSs9VG1ZVXQ8P2Rzakk2VGtzLileMHBAQFpCMiZXUGpgSGY9QkInLjBzPE5VLzMmZGA/VHVYMyQ4KGpBKjMhJCJLUltcTTg8IWQiNlEyW2lCR0pRJGozRjc+JWFVUGFELGkwVFFfTmY1Uz9CNkVhWj87ZjEiMjhKI0tpODdIJjAkJlwjX2JvKDpHWGdaPkNZJS1zYkgiNUlcXXVaWFtvWlwiSSk3Oj9WdDQhTlJaKGFUfj5lbmRzdHJlYW0KZW5kb2JqCjE4IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDE1NTIKPj4Kc3RyZWFtCkdhdCUiOWxKY1UmQUBzQjlNVWlcTTw6XigyMjxDUyNccCJ0T11GXyJeOSNEQFwuUVxbXDRbTTNwTmEpPDdbMEZZLjFGazdGdWFMJ11mLmErLilccEJJTVlNS2hfdCxyNSwnSSZjJlNNVDg4N1pTck9LSzlJLTQ2O2IoSW5ZS2dAZ0BpPzAmNTZzMTViQnBfYmBBTzNhN1FhQWQkbHM2XyNxMy5McmpnL2M+ZjFKRTFUb1pjNkFRdChpXVZqIiVnQUYoT0g/YygxSEBYKEQ2SCVoNGFKJ3JYMyJNMG9SPGpbNicmcyhXKkgsU2srSDJMcTlOYDI7bFI1PiUsYFk2OWghVihrNlY5QWdfdHQ4Zk4kI1tjQj43Ty1BN1xEcCFXQV9oTDI4MSM/YThFOl1ELCVObmQ+L11jbWBZQDVbUFtIQ00qMC82K0JcTCdhWDNDM01TPjlXOENIOC05RGMxXWVIZ1lIZHNzUWZvc3NuUV40NFNIUj5kcz1kJVgoOzpiPHNwLlEzITJwLShDZyphV01jIWBmNSpBVjQ8QV1rKycjIUZxNC0oWyteVU1WbF1Qa2wxYSE1PD9tcDctcSlZWSguJVA0QWBcZV9sX3FkLyVdJTVEY19zM2NYWztxL0BMWidJPGJBWy1dQ25sZidkajo5KmVRIUVjJDc8K2drYVxvSCJtRyJ0aFFTMmNKXGAnPWVgJUg5S0JGLSJtUiFiJSddWCMjbmgnLnVMRl5eT1hMKjlxRUs9bjsyayw1NnNqbG5rK1wsXThCN1V0SmI2bWIxWFhmcmw0KWYsXidObClTRDpYWVdFOWhTRi0rPTQvOSRfQS1WKyo+QUhlVlxhRTc8L2o2NVoqOW1iJ2soU28ncjY+SmlCZjNgUmRjWGMuIS9PV0Y1IW5hUStYLEgwZDZlczNmSE9WW0E/Y2trcFQwZzZMVV9PXWZmKCFVUlsvXUFvKVpoampYMHVxRlhyKmBYODhPLjFEU3U5Tk9LISY/aDoyUjVvZW0zLG1qWS4qQSVyNzN0YnRjV1F0bW49ZDdUJFlFVyFELzFMWilUOSROR0c4PE43Lj5YZlxja0Y0Zl9kXiE9NDRTXSlfdF0lYiwuWiFvV187O1MsZ0pDSk5vUyphWU9AUk1XUURiWEplIV1rTSVcOD8yLyhSSVcmMVJDI1Q8cjkpPFJyQkNZUSNSQlpkdVFbUzQzVU05NVxgNGRlTDlAb24kTy5uY0NrIyhbQCZHQF44WnJGJkdCR1pcUzVZSFJIKTY1I1ZaSUVtYUlyTEhTOyVgT0RlP2RIL0I6X0RTJ15dRTJQT1chMUNMayxKJVldQl4uV1A0LU5LJHRhUURTIVNuSE0ubmpvVSFlSCJwZExTJm8mX1JYK0dWOXVEbmlXKCwmWEcqbFtOQk0xPkdWWUQ5PWswWyMzL3JIZ25VJFJxXCpKNXU5TzJnKDdCNkdscTY8cURXI1c3Jk5ccGpeXk5xKkBpQDFcLS4vLkZoTU9oUXRLTF1GJi9HJVckUllYSkczczQuP288RDcnPlF0TFsrNFIqTWNSKCZIQjBSNT1RKFo7L25uaGVIaDZZU1hFKkIsXnMkU0NgKVVsMGw0MD8nSG5OaXMmSShXYlgrXlRqOy8iYVVrOVhfLXUxRlRdLVtBbmVkS3JpcjMqKEZoLkBYSWkuYUJOR1NHTVhYJzhOSCstIVM6ME1SbTFmcmhEUyYsbzduN0FBSms3O3AhPF9fYl81Mi9zOSJaUXFjTU08ZE1tbzw8PlNkc2liOm5qZjhxV1xUbyFfb2ooOlpfXjk5ZEhJNTBtTkNRbTYpaS9ERW9rOUstVXBuYVcrSVxkSUoyalxTZCttQF80SV1cTjFQM2IpSWFaQVhlZ2IlJjpgcUxqamJGLz85WHBOITNWOzttZHAzZDBRVitRRzpEbjZaKzgnTy88TlhxZSdGPkAwWjdCQHU4VHI9Tz5HcGdSRCEmTUs4MXBSWFZGMG0iU1pXVS9NQS1CJTxIaXNGSj9wT2dfLSVaaWdAYVBqT2EyJXQ9UVFsZGI9XTU2akZHQkVRX1I5O2hkfj5lbmRzdHJlYW0KZW5kb2JqCjE5IDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDE0NDEKPj4Kc3RyZWFtCkdhdFUyOWxLJk0nWU5VMV1LT2VMMy9nN1IybEBAWlppdFZXRkRFIV5qP2QiNlYyWmIjVShqZzJJPj1VNElsLCtbLiJWUitUQ2g5WlJHZytoSDItcHNoZWMkWWorX0ZtSS5COjc5KEc9YmRjTWUxRG0nKU5aQl1yPCg+NGtrcGZwLyVUPWFsXGNkTDB1LiNLMmFBUjgnIlE8JjMoXXA3SmhcZ3EpdDJibyJUPC1SdTVcaj9tZGtfZixBcSpMUz5rP14oWCtfPEd0cUcuQ2IscVNWPlBeKD8mMEZmKmtFNzNjaiUoZVdtN2EpN0crSkJvUT1pTjY+OTs5WUpOLmtdL1x1MjlVQVNFIioqKmg7Xlcxai9nalhmQmkyVm9jWXFJKjNWXUY3XWFwTFRJN0pzUlxEKTE+PF00LCQkTE5zQEQ7K0dydFE0QmlrTVZnRVkmUilvZjZESGZiSChwX2Qpcj49V2o2KiFeK0JiNVByTzRUWTMsamlEaWwjQDotWHI5bFNlQztnLSJIP0AzYWJFREZPQipzKScqa3MiRWRjZm4nKGtuQWlLOWluKzVlJTprIyxWdXI2XFtfK2VcRmEyJWZpQSFMT10jNEZxPkdzMF5hUWkjRVhjZmUmLC5WV0lJUF9qTTxcJHVLQzBdJ2oyckg3QjlUMiRZVlxeMEBBXW5SU2A+OENqXDxNMVJjRyFqcjFHanIpXTBLI2JPSkxcZG4+PU9sNGBNLU5iZURVbksoXCJjUCo9dUlcZyZkKGVUPUwobT5WSGpQKkJIJEs4UjAsRSVFXUJSVFg5cEQnT081b09iaCRkNUsiR3VyYiphKzlYXSZeUWBGa15ZcFFnMyliLEotb1U5cU04NjByIjNbOFZUb0Q1U1g4ZlVAYS1BZ3BaYWExPi5GIypQM2wiV1k3WSRCKTU5OFhxOFkiKlAzTjhmREpZJDQncV4oOWtgOU1BaTwsRzBOLU1FQ0c1RCo0MUs1Qi4sdDgnM3JfckZ1TFo3UFtQR0o8ISE5ZlcwOlJZN00jMGJhMGMnaUxLWUlzNVlfZXNaaVtCNGtYQlxLbmljRFEycVciUV5oZCQ6RTdVN2BkWCY5dVVKYidJaVJ0VGknKVFlVmotSk4nMjZEMCJVNCYsNkMjSV43RUEvNGBOIS1eRSY9SjlOPVYnXERRa1khJFM5SWdrVEVgI25Gam84aiVnZ1BePTsmVlZpN243Y1dSJGhIJD5nYUQ1ZUcjdWMmOilcTDFuLVFYa0NCa20obDleVCdrcEhjMSRZVV9gMXFUWFg6OCxvc2hgTGdoQjYtKG9FPnNkaGFgODNOKl0wPlY5ZzpuP1dLVEhIMSNrbl4qW25CSiMuc0wjYl9hZF1XSmNcYmNrPXJWJCdUZjpWS3FlKHMxX0c5Pzk7Z3EtTTc2aGVdWkE1ISI3bTA3aUUrcjE9Zk5bNlZATXVzYFEyQCpuZ2clT0liIz43YGZdPCY0a0twS11OSEZvMkMmWFQyVXBuNWJjIk8/IUw5I0pTNjRQKTFtOVdbP1UzNykzS2gtbT4rLTwpS1ZaI151UlNbVTs0M2FxRz0zKTUuV2EjYVhWYmNDYWU5TiU1SF8mSGdnLGw5O2hPcyEtMUlPZSdPYXVqLiFHPU9ZSV1wX1g/XUEuT2RSIWAvMlclI2skMT9pTFdfKU5jI2MhbjFRSDsyLl41b2ZlcWQhLiIjaXErTGxUcCokOVFGPGQ7TnJjPVBKT0ZgUTVIP3MvSzZXT1AxOzF1VGgnW2k2P2U8Sz5lVi5qJmZLWEJ0WGU9YztIRTdUZ2BrQGgwVTpdY0huLjpCLDg9MVgpN09oIi1NYVZdRShUaF9YRk9wViUvWEpBIVI8KCdcalhJKidYMmg0RT1nKlshWEQsRSxMLlNcS3BEND00WDFuW29CQTJHfj5lbmRzdHJlYW0KZW5kb2JqCjIwIDAgb2JqCjw8Ci9GaWx0ZXIgWyAvQVNDSUk4NURlY29kZSAvRmxhdGVEZWNvZGUgXSAvTGVuZ3RoIDE3ODUKPj4Kc3RyZWFtCkdhdG06OWxKY1UmQUA3Lk4pLF1ITCQjOihmbltFTlAvOVk8VlBvJD5KMWlFbjdDIixKYiZTQGNzMVdEcDc5YyM8YGVWRV82InVcV25gSiljJC06Lm9AL29DQWQ+JkltSGslUDFCc2pXV3AwcTNSVGhoXzVocW0lTUxiXldnOCVvY1xPKVBYTVhUVjVSQVsuayhPc0ZBPm9HPWxMQm0vQ2BcYnJHKXFyNTZTYmIvTkNGW3BxXFkpcDQsPyNgVD5JcVxOSGRGUVMqUiRMNVlmaDMtVFQ2YSc/QUpBYF8nSkVxWSwhTjolI0QqdDctYFE5YWQzPkMpJiV1TmNgQ0xXXl4tMScvV0Y7RS4yS2VVT0tGZGJ1Zz4kPF8vJFVtLmUmLWYuWCVMZkFWJkU1Tj4iUEZiTTsqcktAdD1AQEdpQ0FaMTZzTTtkMz9pQEo2JSI+Yzk8KklBOGQjPzZgJklHKGUzKjZtLE9hUzI9cS5da1lYTm1dNWpnWiNCLjI+Il4wcE5FUmxCJl4kKUZzZS4tYW1yTGVBR21VXCsjO1tHNmxpSCM5MiZkREwjbmArR1wxYk09NjxLIyEzUywidGw3TTYyJ0FaL0xSMTVicSEnTyomUC5kMGY0MktgQGk/SmouT11IKy48NDlaUDRWZnEmV25EW2dZQEFcNFJYMU9QRUAmVSc2ZGAwVz4/LTsjY09jQV5LPmQ5dWRyIWpSKmdEMFlvczZuUEUzTiVrJGpvZ1hMb1JcMls2Z05wXy1GZzZpQjJgVDFnJmVXSm01b3BdJEFSNEhAakRUNzlBLzs9bClsPWhWSCZHKyImdGJIckUzS29lYklFckMuWTZZTDlncFUpa2g4JG82QlskUW9JdCheSUZfTUVsN3VfaTNORS41aDA0MERlSUdjZVhZPXFtMWYsMEMxQTAtOV9FdTFbUCoyaFU0KGlTWyxXLGYzaUc9SC0mKEpFQmokcXJxXz0tKl4/PFBZUCdgQEMwSWtzKG5YZUZObWg5cSJWaDRnLlFPQTFLPF9CWik9RDVfREIrTiVUU2hsZlkmQ0kkZjBYYFwkN1VANUc+WDdaUiItbSZdO2BrTXEvOTJecTMiOmNBPCNbSG9kOyIxUCtPblNIIi5OUC4sXUlQKkJFcU1OJ3FIYG4xIlRncCk5I0wnbSVEJE9mVSRYK2gpdHEzXHUuRWU0dWRUaCdNcXFVXy41VmxsIiFfbCFLOyc0ND9yJ1tKQF5wX2xJOFZDYTVKY2A+bVZKV2VITW9GVT1uOGEzQyI5YVRZOTxzPCovXVwsIUYlcV5POTYySjZMT11EO20uT21HcmA9cmdmdSo3VHE8UkhKPXFwcUgtJSE5SWtHWEFQXiVjcyJKayQzOStQbHJ0JTE8OFwiWzFzNmtOQ1BzUTZCRS1kPChAdGIsVFVZQlhqPWpsWFcyKU45U2sxWSdIKT1LLW1maVtQJmIsY0cnPkxzTCZFTmhGYzY6NnEvQms+dUJaKz9pSmFkVUxQQ2tmKVNfIkVCb1lTUEwwb0o/MCxiSyotI2JIQmQxRnI3VlhbSElIZS1kTjdwYChGW11QNCJCKzxEaENmTWQiPFplPmhpOiQ7P0IlNj90ayhzLmJuLU8vSG4xXD4jUlxjNSNwV20hLmJCVGtpRT8oZ1kmJWJxYFFySl1cbG9qQkU3blcmbzJvPihNUytuMXRIaC9NQS5hT2g0SkZXVVgubGUmPTlrR11wSmVnTSwrS2ZdJi1ZLmBoUENjPGlJVVFxblIsJjxcVVM0I2FDNlkqUSg6QTJhWzIkXCRfYCYpLD1uOzBWTTEuNVwyOyNWI18sK1Y/Oihycl5uJSRxRl4/bmpvdWchdVd0PkNWW3UuJUQ0cVtQQU9xSEMvMyQpPV8/aW5pWFxHUDAnKXBjVnVgNTxjQW9jO20nSzQkUmVgI005W2huTlZRcEVmNi9FMV0tJltzRDpHODZpREohWmBANGY5PGQoPGJscVY5ZWRIZHApcUZiJTJsLG49PzpMR2k7RF1FUk5nZVMuLktFUi1ITjtyN29OZ1A1N1VRaylzUE8zN11dPSkxcklWXzYwQDZvSUc9XVVUMkgzPHNdWE5FcXVaVGx1bDosSUx0WGU/MyFoPkAoWzBPSzozaFY1cyMrWT42MWwuRGJaXUhzRCxCJ09UaWNFXmJIcltCajU8LEFFOW9rcVk8Tk0tIThUMV5zN0glJltuLExWWlh1UllTRFgiYDA7UTonckxmLSU5S0AzbnE/XDFeWW9CKjVkJEdSKydFTWc3JEIrIXU+ZDhqTlhVLWVqMVskNm4lWUhjPlJzVFdPb2dbVkdnJHJTJ202JSJKIyhAX2duUCEqM1ZoXzNHL3U8cVxLNmFfUid+PmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDIxCjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDA2MSAwMDAwMCBuIAowMDAwMDAwMTIyIDAwMDAwIG4gCjAwMDAwMDAyMjkgMDAwMDAgbiAKMDAwMDAwMDMzNyAwMDAwMCBuIAowMDAwMDAwNDQ3IDAwMDAwIG4gCjAwMDAwMDA2NTIgMDAwMDAgbiAKMDAwMDAwMDc2MSAwMDAwMCBuIAowMDAwMDAwOTY2IDAwMDAwIG4gCjAwMDAwMjIwNjQgMDAwMDAgbiAKMDAwMDAyMjMzMiAwMDAwMCBuIAowMDAwMDIyNTM4IDAwMDAwIG4gCjAwMDAwMjI2MjUgMDAwMDAgbiAKMDAwMDAyMjkyNSAwMDAwMCBuIAowMDAwMDIyOTk5IDAwMDAwIG4gCjAwMDAwMjMxMTEgMDAwMDAgbiAKMDAwMDAyMzIyMiAwMDAwMCBuIAowMDAwMDIzMzAxIDAwMDAwIG4gCjAwMDAwMjM3MzEgMDAwMDAgbiAKMDAwMDAyNTM3NSAwMDAwMCBuIAowMDAwMDI2OTA4IDAwMDAwIG4gCnRyYWlsZXIKPDwKL0lEIApbPDY4MDg5MzBmZjMzMDQ0YzM3NzM0ZjcyYjY4MjJmZGE0Pjw2ODA4OTMwZmYzMzA0NGMzNzczNGY3MmI2ODIyZmRhND5dCiUgUmVwb3J0TGFiIGdlbmVyYXRlZCBQREYgZG9jdW1lbnQgLS0gZGlnZXN0IChvcGVuc291cmNlKQoKL0luZm8gMTIgMCBSCi9Sb290IDExIDAgUgovU2l6ZSAyMQo+PgpzdGFydHhyZWYKMjg3ODUKJSVFT0YK';
+
+const $ = (s) => document.querySelector(s);
+const S = { file: null, name: '', pdf: null, outline: [], meta: {}, result: null, busy: false, cancel: false, urls: [], cover: null };
+let lib = null;
+
+async function pdfjs() {
+  if (!lib) {
+    lib = await import(PDFJS + 'build/pdf.min.mjs');
+    lib.GlobalWorkerOptions.workerSrc = PDFJS + 'build/pdf.worker.min.mjs';
+  }
+  return lib;
+}
+
+/* ---------- small helpers ---------- */
+const LIG = { 'ﬀ': 'ff', 'ﬁ': 'fi', 'ﬂ': 'fl', 'ﬃ': 'ffi', 'ﬄ': 'ffl', 'ﬅ': 'st', 'ﬆ': 'st' };
+function cleanText(s) {
+  return s
+    .replace(/[ﬀ-ﬆ]/g, (c) => LIG[c])
+    .replace(/\u0002/g, '­')
+    .replace(/[\t\r\n]/g, ' ')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F￾￿]/g, '')
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
+}
+const ACC = { '¨': '\u0308', '´': '\u0301', '`': '\u0300', 'ˆ': '\u0302', '˜': '\u0303', '¸': '\u0327', 'ˇ': '\u030C', '˘': '\u0306', '˚': '\u030A', '˝': '\u030B' };
+function fixAccents(s) {
+  return s.replace(/([¨´`ˆ˜¸ˇ˘˚˝]) ?([A-Za-zı])/g, (m, a, c) => {
+    const r = ((c === 'ı' ? 'i' : c) + ACC[a]).normalize('NFC');
+    return r.length === 1 ? r : m;
+  });
+}
+const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const norm = (s) => s.toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const fmtBytes = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+const median = (a) => { if (!a.length) return 0; const b = [...a].sort((x, y) => x - y); return b[b.length >> 1]; };
+function modeOf(values, weights, step = 0.5) {
+  const m = new Map();
+  values.forEach((v, i) => { const k = Math.round(v / step) * step; m.set(k, (m.get(k) || 0) + (weights ? weights[i] : 1)); });
+  let best = 0, bw = -1;
+  for (const [k, w] of m) if (w > bw) { bw = w; best = k; }
+  return best;
+}
+const isCJK = (c) => /[　-鿿가-힯豈-﫿]/.test(c || '');
+const TERMINAL = /[.!?:…。！？]["'”’»)\]]*$/;
+const BULLET = /^([•●▪■◦‣∙○◆►✓➢–—*-]|\(?\d{1,3}[.)]|\(?[a-z][.)])\s+\S/;
+const PAGE_NUM = /^[\s\-–—|•·.]*(page\s*)?(\d{1,4}|[ivxlc]{1,6})(\s*(of|\/)\s*\d+)?[\s\-–—|•·.]*$/i;
+class Cancelled extends Error {}
+const tick = () => new Promise((r) => setTimeout(r, 0));
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
+
+/* ---------- UI wiring ---------- */
+const ui = {
+  file: $('#file'), drop: $('#drop'), card: $('#filecard'), thumb: $('#thumb'), fname: $('#fname'), fmeta: $('#fmeta'), chips: $('#chips'),
+  notice: $('#notice'), title: $('#title'), author: $('#author'), lang: $('#lang'), chapters: $('#chapters'),
+  convert: $('#convert'), prog: $('#prog'), bar: $('#barfill'), progtext: $('#progtext'),
+  result: $('#result'), stats: $('#stats'), download: $('#download'), dlmsg: $('#dlmsg'),
+  toolbar: $('#toolbar'), chsel: $('#chsel'), prev: $('#prev'), next: $('#next'), reader: $('#reader'), empty: $('#empty'), page: $('#page'),
+  pwform: $('#pwform'), pw: $('#pw'),
+};
+
+function notice(msg, kind = 'warn') {
+  ui.notice.hidden = !msg;
+  ui.notice.textContent = msg || '';
+  ui.notice.classList.toggle('err', kind === 'err');
+}
+function progress(frac, text) {
+  ui.bar.style.width = Math.round(Math.min(1, Math.max(0, frac)) * 100) + '%';
+  if (text) ui.progtext.textContent = text;
+}
+
+ui.file.addEventListener('change', () => { const f = ui.file.files[0]; ui.file.value = ''; if (f) openFile(f); });
+['dragenter', 'dragover'].forEach((t) => ui.drop.addEventListener(t, (e) => { e.preventDefault(); ui.drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach((t) => ui.drop.addEventListener(t, () => ui.drop.classList.remove('over')));
+ui.drop.addEventListener('drop', (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) openFile(f); });
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', (e) => { e.preventDefault(); const f = e.dataTransfer?.files?.[0]; if (f && !S.busy) openFile(f); });
+$('#sample').addEventListener('click', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  const bin = atob(SAMPLE_PDF); const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  openFile(new File([u8], 'alice-sample.pdf', { type: 'application/pdf' }));
+});
+$('#swap').addEventListener('click', () => ui.file.click());
+$('#cancel').addEventListener('click', () => { S.cancel = true; ui.progtext.textContent = 'Stopping…'; });
+ui.convert.addEventListener('click', () => runConvert());
+ui.download.addEventListener('click', () => saveEpub());
+ui.chsel.addEventListener('change', () => showChapter(+ui.chsel.value));
+ui.prev.addEventListener('click', () => showChapter(+ui.chsel.value - 1));
+ui.next.addEventListener('click', () => showChapter(+ui.chsel.value + 1));
+$('#coverfile').addEventListener('change', (e) => { S.cover = e.target.files[0] || null; });
+document.querySelectorAll('input[name=layout]').forEach((r) => r.addEventListener('change', syncLayout));
+function syncLayout() {
+  const fixed = $('#lay-fixed').checked;
+  document.querySelectorAll('#cleanup input, #chapters, #pstyle').forEach((el) => { el.disabled = fixed; });
+  $('#cleanup').style.opacity = fixed ? .5 : 1;
+}
+
+/* ---------- open & inspect ---------- */
+async function openFile(file) {
+  if (S.busy) return;
+  if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
+    notice(`“${file.name}” is not a PDF. Choose a file that ends in .pdf.`, 'err'); return;
+  }
+  notice('');
+  resetResult();
+  ui.convert.disabled = true;
+  try { if (S.pdf) await S.pdf.destroy(); } catch {}
+  S.pdf = null; S.file = file; S.name = file.name;
+  ui.drop.hidden = true; ui.card.hidden = false;
+  ui.fname.textContent = file.name; ui.fmeta.textContent = `${fmtBytes(file.size)} · opening…`; ui.chips.replaceChildren(); ui.thumb.replaceChildren();
+  let L;
+  try { L = await pdfjs(); } catch (err) {
+    notice('The PDF reader could not load. Check your internet connection and reload the page.', 'err'); return;
+  }
+  try {
+    const data = new Uint8Array(await file.arrayBuffer());
+    const task = L.getDocument({
+      data, isEvalSupported: false, enableXfa: false,
+      cMapUrl: PDFJS + 'cmaps/', cMapPacked: true, standardFontDataUrl: PDFJS + 'standard_fonts/',
+    });
+    task.onPassword = (update, reason) => askPassword(update, reason === L.PasswordResponses.INCORRECT_PASSWORD);
+    S.pdf = await task.promise;
+  } catch (err) {
+    ui.pwform.hidden = true;
+    notice(`This file could not be opened as a PDF (${err?.message || err}). It may be damaged or not a PDF.`, 'err');
+    ui.fmeta.textContent = fmtBytes(file.size);
+    return;
+  }
+  ui.pwform.hidden = true;
+  await inspect();
+}
+
+function askPassword(update, wrong) {
+  ui.pwform.hidden = false;
+  ui.pw.value = '';
+  ui.pw.placeholder = wrong ? 'Wrong password, try again' : 'This PDF needs a password';
+  ui.pw.focus();
+  ui.pwform.onsubmit = (e) => { e.preventDefault(); update(ui.pw.value); };
+}
+
+function cleanTitle(t) {
+  t = (t || '').replace(/^\s*(microsoft (word|powerpoint) - )/i, '').replace(/\.(docx?|pptx?|indd|tex|odt|pages|pdf)$/i, '').trim();
+  if (/^(untitled|document\d*|title|\d+)$/i.test(t)) return '';
+  return t;
+}
+
+async function inspect() {
+  const pdf = S.pdf;
+  const n = pdf.numPages;
+  let info = {};
+  try { info = (await pdf.getMetadata()).info || {}; } catch {}
+  const base = S.name.replace(/\.pdf$/i, '').replace(/[_]+/g, ' ');
+  ui.title.value = cleanTitle(info.Title) || base;
+  ui.author.value = /^(anonymous|unknown|user|admin|author)$/i.test((info.Author || '').trim()) ? '' : (info.Author || '').trim();
+  const lang = (info.Language || '').trim();
+  if (/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/i.test(lang)) ui.lang.value = lang;
+  S.outline = await readOutline(pdf);
+
+  // sample pages to spot scans
+  const probe = [...new Set([0, 1, 2, Math.floor(n / 3), Math.floor(n / 2), Math.floor(2 * n / 3), n - 1].filter((i) => i >= 0 && i < n))];
+  let chars = 0, guessed = '';
+  for (const i of probe) {
+    try {
+      const pg = await pdf.getPage(i + 1); const tc = await pg.getTextContent();
+      chars += tc.items.reduce((a, it) => a + (it.str ? it.str.trim().length : 0), 0);
+      if (i === 0) {
+        const its = tc.items.filter((it) => it.str && it.str.trim()).map((it) => ({ s: it.str, h: Math.hypot(it.transform[2], it.transform[3]) }));
+        const max = Math.max(0, ...its.map((it) => it.h));
+        const body = modeOf(its.map((it) => it.h), its.map((it) => it.s.length), 0.5);
+        if (max > body * 1.3) guessed = cleanText(its.filter((it) => it.h > max - 0.6).map((it) => it.s).join(' ')).replace(/\s+/g, ' ').trim();
+      }
+      pg.cleanup();
+    } catch {}
+  }
+  if (!cleanTitle(info.Title) && guessed.length >= 3 && guessed.length <= 160) ui.title.value = guessed;
+  const scanned = chars / probe.length < 40;
+
+  // thumbnail
+  try {
+    const pg = await pdf.getPage(1);
+    const vp0 = pg.getViewport({ scale: 1 });
+    const vp = pg.getViewport({ scale: (148 / vp0.width) });
+    const c = document.createElement('canvas'); c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
+    const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await pg.render({ canvasContext: ctx, viewport: vp }).promise;
+    ui.thumb.replaceChildren(c);
+  } catch {}
+
+  ui.fmeta.textContent = `${n} page${n === 1 ? '' : 's'} · ${fmtBytes(S.file.size)}`;
+  const chips = [];
+  const top = S.outline.filter((e) => e.depth === 0).length;
+  if (S.outline.length) chips.push([`${S.outline.length} bookmark${S.outline.length === 1 ? '' : 's'}`, '']);
+  chips.push(scanned ? ['Scanned, no text layer', 'warn'] : ['Text layer found', '']);
+  ui.chips.replaceChildren(...chips.map(([t, k]) => { const s = document.createElement('span'); s.className = 'chip ' + k; s.textContent = t; return s; }));
+  if (scanned) {
+    $('#lay-fixed').checked = true; syncLayout();
+    notice('This PDF looks scanned: its pages are pictures with no text to reflow. Page images is selected so the book keeps every page exactly. Reflowing a scan would need OCR first.');
+  } else {
+    $('#lay-flow').checked = true; syncLayout();
+  }
+  S.meta = { pages: n, scanned, topBookmarks: top };
+  ui.convert.disabled = false;
+  ui.convert.textContent = 'Convert to EPUB';
+}
+
+async function readOutline(pdf) {
+  let raw = null;
+  try { raw = await pdf.getOutline(); } catch {}
+  const out = [];
+  async function walk(items, depth) {
+    for (const it of items || []) {
+      let page = -1, top = null;
+      try {
+        let dest = it.dest;
+        if (typeof dest === 'string') dest = await pdf.getDestination(dest);
+        if (Array.isArray(dest) && dest.length) {
+          const ref = dest[0];
+          if (ref && typeof ref === 'object') page = await pdf.getPageIndex(ref);
+          else if (Number.isInteger(ref)) page = ref;
+          const kind = dest[1]?.name;
+          if (kind === 'XYZ' && typeof dest[3] === 'number') top = dest[3];
+          else if ((kind === 'FitH' || kind === 'FitBH') && typeof dest[2] === 'number') top = dest[2];
+        }
+      } catch {}
+      const title = cleanText(it.title || '').replace(/\s+/g, ' ').trim();
+      if (page >= 0 && title) out.push({ title, page, top, depth });
+      if (it.items?.length && depth < 2) await walk(it.items, depth + 1);
+    }
+  }
+  await walk(raw, 0);
+  return out;
+}
+
+function readOptions() {
+  return {
+    layout: $('#lay-fixed').checked ? 'fixed' : 'flow',
+    chapters: ui.chapters.value,
+    running: $('#o-running').checked,
+    headings: $('#o-headings').checked,
+    style: $('#o-style').checked,
+    figures: $('#o-figs').checked,
+    pageImages: $('#o-pageimg').checked,
+    footnotes: $('#o-fn').checked,
+    cover: $('#o-cover').checked,
+    pstyle: $('#pstyle').value,
+    quality: $('#quality').value,
+    range: $('#range').value,
+    title: ui.title.value.trim() || S.name.replace(/\.pdf$/i, ''),
+    author: ui.author.value.trim(),
+    lang: (ui.lang.value.trim() || 'en').replace(/[^A-Za-z0-9-]/g, '') || 'en',
+  };
+}
+
+function parseRange(str, n) {
+  const s = (str || '').trim();
+  if (!s) return [...Array(n).keys()];
+  const set = new Set();
+  for (const part of s.split(/[,;\s]+/).filter(Boolean)) {
+    const m = part.match(/^(\d+)?\s*[-–]\s*(\d+)?$/);
+    if (m) { const a = Math.max(1, +(m[1] || 1)), b = Math.min(n, +(m[2] || n)); for (let i = a; i <= b; i++) set.add(i - 1); }
+    else if (/^\d+$/.test(part)) { const i = +part; if (i >= 1 && i <= n) set.add(i - 1); }
+    else throw new Error(`“${part}” is not a page or range. Use numbers like 1-120, 130.`);
+  }
+  if (!set.size) throw new Error(`No pages between 1 and ${n} match “${s}”.`);
+  return [...set].sort((a, b) => a - b);
+}
+
+/* ---------- run ---------- */
+async function runConvert() {
+  if (!S.pdf || S.busy) return;
+  const o = readOptions();
+  let pages;
+  try { pages = parseRange(o.range, S.pdf.numPages); } catch (e) { notice(e.message, 'err'); return; }
+  notice('');
+  S.busy = true; S.cancel = false;
+  ui.convert.disabled = true; ui.prog.hidden = false; $('#cancel').hidden = false; progress(0, 'Starting');
+  resetResult();
+  const t0 = performance.now();
+  try {
+    const book = o.layout === 'fixed' ? await convertFixed(o, pages) : await convertFlow(o, pages);
+    progress(0.96, 'Packaging EPUB');
+    const blob = await packEpub(book, o);
+    S.result = { book, blob, o, filename: safeName(o.title) + '.epub' };
+    progress(1, `Done in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+    showResult();
+  } catch (err) {
+    if (err instanceof Cancelled) { notice('Conversion stopped. Change settings and convert again when ready.'); }
+    else { console.error(err); notice(`Conversion failed: ${err?.message || err}. Try the Page images layout, or a smaller page range.`, 'err'); }
+    ui.prog.hidden = true;
+  } finally {
+    S.busy = false; ui.convert.disabled = false; ui.convert.textContent = 'Convert again'; $('#cancel').hidden = true;
+  }
+}
+const safeName = (t) => (t.replace(/[\\/:*?"<>|\u0000-\u001F]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'book');
+const check = () => { if (S.cancel) throw new Cancelled(); };
+
+/* ---------- rendering helpers ---------- */
+async function renderPage(pdf, idx, targetWidth, maxScale = 4) {
+  const page = await pdf.getPage(idx + 1);
+  const vp1 = page.getViewport({ scale: 1 });
+  let scale = Math.min(maxScale, targetWidth / vp1.width);
+  if (vp1.height * scale > 4000) scale = 4000 / vp1.height;
+  const vp = page.getViewport({ scale });
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(vp.width)); c.height = Math.max(1, Math.round(vp.height));
+  const ctx = c.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  page.cleanup();
+  return { canvas: c, scale };
+}
+const toJpeg = (c, q) => new Promise((res, rej) => c.toBlob((b) => b ? res(b) : rej(new Error('Image encoding failed')), 'image/jpeg', q));
+function isBlank(c) {
+  const s = document.createElement('canvas'); s.width = 48; s.height = 48;
+  const x = s.getContext('2d'); x.drawImage(c, 0, 0, 48, 48);
+  const d = x.getImageData(0, 0, 48, 48).data;
+  let dark = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] < 720) dark++;
+  return dark < 6;
+}
+function crop(c, x0, y0, x1, y1) {
+  const w = Math.max(1, Math.round(x1 - x0)), h = Math.max(1, Math.round(y1 - y0));
+  const o = document.createElement('canvas'); o.width = w; o.height = h;
+  const ctx = o.getContext('2d', { alpha: false }); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(c, Math.round(x0), Math.round(y0), w, h, 0, 0, w, h);
+  return o;
+}
+
+/* ---------- fixed layout ---------- */
+async function convertFixed(o, pages) {
+  const pdf = S.pdf;
+  const width = o.quality === 'high' ? 1800 : 1200, q = o.quality === 'high' ? 0.9 : 0.82;
+  const files = [], images = [];
+  for (let k = 0; k < pages.length; k++) {
+    check();
+    const p = pages[k];
+    progress(k / pages.length * 0.95, `Drawing page ${p + 1} of ${pdf.numPages}`);
+    const { canvas } = await renderPage(pdf, p, width, 6);
+    const name = `images/page-${String(p + 1).padStart(4, '0')}.jpg`;
+    images.push({ name, blob: await toJpeg(canvas, q), w: canvas.width, h: canvas.height });
+    files.push({ id: `p${p + 1}`, href: `page-${String(p + 1).padStart(4, '0')}.xhtml`, title: `Page ${p + 1}`, page: p, img: name, w: canvas.width, h: canvas.height });
+    canvas.width = canvas.height = 0;
+    if (k % 4 === 3) await tick();
+  }
+  const nav = [];
+  for (const e of S.outline) {
+    const f = files.find((x) => x.page >= e.page);
+    if (f) nav.push({ title: e.title, file: f.href, anchor: '', depth: e.depth });
+  }
+  if (!nav.length) for (let i = 0; i < files.length; i += 10) nav.push({ title: files[i].title, file: files[i].href, anchor: '', depth: 0 });
+  let cover = null;
+  if (S.cover) cover = await coverFromUpload(S.cover);
+  else if (o.cover && files.length) { cover = { reuse: images[0].name, w: images[0].w, h: images[0].h }; }
+  return { fixed: true, files, images, nav, cover, stats: { pages: pages.length, words: 0, figures: 0 } };
+}
+
+async function coverFromUpload(file) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+  const ctx = c.getContext('2d', { alpha: false }); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(bmp, 0, 0, c.width, c.height);
+  return { name: 'images/cover.jpg', blob: await toJpeg(c, 0.88), w: c.width, h: c.height };
+}
+
+/* ---------- reflowable: extraction ---------- */
+const IDENT = [1, 0, 0, 1, 0, 0];
+function scanOps(ops, OPS, vp, Util) {
+  const boxes = [];
+  let ctm = IDENT, stack = [];
+  const paint = new Set([OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintImageMaskXObject, OPS.paintImageXObjectRepeat].filter((x) => x != null));
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    const fn = ops.fnArray[i], a = ops.argsArray[i];
+    if (fn === OPS.save) stack.push(ctm);
+    else if (fn === OPS.restore) ctm = stack.pop() || IDENT;
+    else if (fn === OPS.transform) ctm = Util.transform(ctm, a);
+    else if (fn === OPS.paintFormXObjectBegin) { stack.push(ctm); if (a && a[0] && a[0].length === 6) ctm = Util.transform(ctm, Array.from(a[0])); }
+    else if (fn === OPS.paintFormXObjectEnd) ctm = stack.pop() || IDENT;
+    else if (paint.has(fn)) {
+      const pts = [[0, 0], [1, 0], [0, 1], [1, 1]].map(([x, y]) => vp.convertToViewportPoint(...Util.applyTransform([x, y], ctm)));
+      const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+      boxes.push({ x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) });
+    }
+  }
+  return boxes;
+}
+
+function mergeBoxes(boxes, pad = 4) {
+  let list = boxes.map((b) => ({ ...b }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    outer: for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      const a = list[i], b = list[j];
+      if (a.x0 - pad <= b.x1 && b.x0 - pad <= a.x1 && a.y0 - pad <= b.y1 && b.y0 - pad <= a.y1) {
+        list[i] = { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) };
+        list.splice(j, 1); changed = true; break outer;
+      }
+    }
+  }
+  return list;
+}
+
+async function extractPage(pdf, idx, o) {
+  const page = await pdf.getPage(idx + 1);
+  const vp = page.getViewport({ scale: 1 });
+  const tc = await page.getTextContent();
+  let boxes = [];
+  const fonts = {};
+  if (o.style || o.figures) {
+    let ops = null;
+    try { ops = await page.getOperatorList(); } catch {}
+    if (ops && o.figures) boxes = scanOps(ops, lib.OPS, vp, lib.Util);
+    if (ops && o.style) {
+      for (const id of new Set(tc.items.map((i) => i.fontName))) {
+        let bold = false, italic = false;
+        try {
+          if (page.commonObjs.has(id)) {
+            const f = page.commonObjs.get(id);
+            const name = String(f?.name || '').replace(/^[A-Z]{6}\+/, '');
+            bold = !!f?.bold || /bold|black|heavy|semibold|demi|-b$|,b$|-bd/i.test(name);
+            italic = !!f?.italic || /italic|oblique|-it$|,it$|bdit$|boldit$|-i$|kursiv/i.test(name);
+          }
+        } catch {}
+        fonts[id] = { bold, italic };
+      }
+    }
+  }
+  const lines = buildLines(tc, vp, fonts, idx);
+  page.cleanup();
+  return { idx, vp, w: vp.width, h: vp.height, lines, boxes };
+}
+
+function buildLines(tc, vp, fonts, pageIdx) {
+  const Util = lib.Util;
+  const lines = [];
+  let cur = null;
+  const finish = () => { if (cur) lines.push(cur); cur = null; };
+  for (const it of tc.items) {
+    if (typeof it.str !== 'string') continue;
+    const str = cleanText(it.str);
+    if (!str) continue;
+    const tx = Util.transform(vp.transform, it.transform);
+    const size = Math.hypot(tx[2], tx[3]) || Math.hypot(tx[0], tx[1]);
+    if (!(size >= 1)) continue;
+    if (Math.abs(tx[1]) > Math.abs(tx[0]) * 0.3 + 0.01) continue; // rotated or vertical text, e.g. margin stamps
+    const x = tx[4], y = tx[5], w = Math.abs(it.width || 0);
+    const f = fonts[it.fontName] || {};
+    if (!str.trim()) { if (cur && Math.abs(y - cur.y) < cur.size * 0.6) cur.spaceNext = true; continue; }
+    if (cur) {
+      const big = Math.max(size, cur.size);
+      const sameRow = Math.abs(y - cur.y) <= big * 0.55;
+      const forward = x >= cur.lastX - big * 0.5;
+      if (sameRow && Math.abs(x - cur.lastX) < size * 0.25 && str === cur.lastStr) { // fake bold: same text printed twice
+        cur.spans[cur.spans.length - 1].b = true; continue;
+      }
+      if (sameRow && forward) {
+        const gap = x - cur.xEnd;
+        const last = cur.spans[cur.spans.length - 1];
+        const sup = size < cur.size * 0.8 && (cur.y - y) > cur.size * 0.15;
+        if (gap > big * 2.5) { cur.hard = true; cur.spans.push({ t: ' ' }); }
+        else if ((gap > size * 0.15 || cur.spaceNext) && !/\s$/.test(last.t) && !/^\s/.test(str) && !(isCJK(last.t.slice(-1)) && isCJK(str[0]))) cur.spans.push({ t: ' ' });
+        cur.spans.push({ t: str, b: !!f.bold, i: !!f.italic, sup, size });
+        cur.xEnd = Math.max(cur.xEnd, x + w); cur.lastX = x; cur.lastStr = str; cur.spaceNext = false;
+        if (size > cur.size * 1.2 && !sup) { cur.size = size; cur.y = y; }
+        continue;
+      }
+      finish();
+    }
+    cur = { page: pageIdx, x, y, xEnd: x + w, size, lastX: x, lastStr: str, spans: [{ t: str, b: !!f.bold, i: !!f.italic, size }], hard: false };
+  }
+  finish();
+
+  // when the content stream is not in reading order, sort by position
+  let ups = 0;
+  for (let i = 1; i < lines.length; i++) if (lines[i].y < lines[i - 1].y - lines[i - 1].size * 2) ups++;
+  if (ups > Math.max(3, lines.length * 0.15)) {
+    lines.sort((a, b) => (Math.abs(a.y - b.y) < Math.min(a.size, b.size) * 0.5 ? a.x - b.x : a.y - b.y));
+    for (let i = lines.length - 1; i > 0; i--) {
+      const a = lines[i - 1], b = lines[i];
+      if (Math.abs(a.y - b.y) < Math.min(a.size, b.size) * 0.5 && b.x >= a.xEnd - a.size) {
+        a.spans.push({ t: b.x - a.xEnd > a.size * 2.5 ? ' ' : ' ' }, ...b.spans);
+        a.xEnd = Math.max(a.xEnd, b.xEnd); a.hard = a.hard || b.hard || b.x - a.xEnd > a.size * 2.5;
+        lines.splice(i, 1);
+      }
+    }
+  }
+  for (const l of lines) finalizeLine(l);
+  return lines.filter((l) => l.text);
+}
+
+function finalizeLine(l) {
+  const sp = l.spans;
+  if (sp.length) { sp[0].t = sp[0].t.replace(/^\s+/, ''); sp[sp.length - 1].t = sp[sp.length - 1].t.replace(/\s+$/, ''); }
+  for (const s of sp) s.t = s.t.replace(/­(?=.)/g, '').replace(/ {2,}/g, ' ');
+  if (sp.some((s) => /[¨´`ˆ˜¸ˇ˘˚˝]/.test(s.t))) {
+    // TeX places accents as separate glyphs: merge them into one span first so they can combine
+    for (let i = 0; i < sp.length - 1; i++) if (/[¨´`ˆ˜¸ˇ˘˚˝] ?$/.test(sp[i].t) && /^[A-Za-zı]/.test(sp[i + 1].t)) { sp[i].t = sp[i].t.replace(/ $/, '') + sp[i + 1].t; sp.splice(i + 1, 1); i--; }
+    for (const s of sp) s.t = fixAccents(s.t);
+  }
+  l.text = sp.map((s) => s.t).join('').replace(/\s+/g, ' ').trim();
+  const sizes = [], weights = [];
+  for (const s of sp) if (s.size && !s.sup) { sizes.push(s.size); weights.push(s.t.length); }
+  if (sizes.length) l.size = modeOf(sizes, weights, 0.25);
+  const textChars = sp.filter((s) => s.t.trim() && !s.sup).reduce((a, s) => a + s.t.replace(/\s/g, '').length, 0);
+  const boldChars = sp.filter((s) => s.b && !s.sup).reduce((a, s) => a + s.t.replace(/\s/g, '').length, 0);
+  l.allBold = textChars > 0 && boldChars >= textChars * 0.95;
+  if (/(\.\s?){4,}\s*\S{1,6}$/.test(l.text) || /…{2,}/.test(l.text)) l.hard = true; // table-of-contents leaders
+  l.bullet = BULLET.test(l.text);
+}
+
+/* ---------- reflowable: analysis ---------- */
+function stripRunning(pages, o) {
+  const keyOf = (l) => l.text.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
+  const bands = (pg) => {
+    if (!pg.lines.length) return [];
+    const ys = [...new Set(pg.lines.map((l) => Math.round(l.y)))].sort((a, b) => a - b);
+    const top = new Set(ys.slice(0, 2)), bot = new Set(ys.slice(-2));
+    return pg.lines.filter((l) => (top.has(Math.round(l.y)) && l.y < pg.h * 0.16) || (bot.has(Math.round(l.y)) && l.y > pg.h * 0.84));
+  };
+  const counts = new Map();
+  for (const pg of pages) for (const k of new Set(bands(pg).map(keyOf))) counts.set(k, (counts.get(k) || 0) + 1);
+  const body = bodySize(pages);
+  let removed = 0;
+  for (const pg of pages) {
+    const kill = new Set();
+    for (const l of bands(pg)) {
+      if (l.size >= body * 1.18) continue;
+      if ((PAGE_NUM.test(l.text) && l.text.length < 16) || (pages.length >= 4 && counts.get(keyOf(l)) >= 3 && l.text.length < 140)) kill.add(l);
+    }
+    if (kill.size) { pg.lines = pg.lines.filter((l) => !kill.has(l)); removed += kill.size; }
+  }
+  return removed;
+}
+
+function bodySize(pages) {
+  const v = [], w = [];
+  for (const pg of pages) for (const l of pg.lines) { v.push(l.size); w.push(l.text.length); }
+  return modeOf(v, w, 0.5) || 10;
+}
+
+function analyze(pages, o) {
+  const st = {};
+  st.body = bodySize(pages);
+  const gaps = [];
+  let bodyChars = 0, boldChars = 0, italChars = 0;
+  for (const pg of pages) {
+    for (let i = 0; i < pg.lines.length; i++) {
+      const l = pg.lines[i];
+      if (Math.abs(l.size - st.body) < st.body * 0.1) {
+        for (const s of l.spans) { const n = s.t.length; bodyChars += n; if (s.b) boldChars += n; if (s.i) italChars += n; }
+        const p = pg.lines[i - 1];
+        if (p && Math.abs(p.size - st.body) < st.body * 0.1) { const dy = l.y - p.y; if (dy > st.body * 0.8 && dy < st.body * 3) gaps.push(dy); }
+      }
+    }
+  }
+  st.lineGap = gaps.length >= 5 ? modeOf(gaps, null, 0.25) : st.body * 1.25;
+  st.bodyBold = boldChars > bodyChars * 0.6;
+  st.bodyItal = italChars > bodyChars * 0.6;
+
+  // columns: cluster left edges of body lines per page
+  for (const pg of pages) {
+    const bl = pg.lines.filter((l) => Math.abs(l.size - st.body) < st.body * 0.15);
+    const m = new Map();
+    for (const l of bl) { const k = Math.round(l.x); m.set(k, (m.get(k) || 0) + 1); }
+    let lefts = [...m.entries()].filter(([, c]) => c >= 2).map(([k]) => k).sort((a, b) => a - b);
+    const merged = [];
+    for (const x of lefts) if (!merged.length || x - merged[merged.length - 1] > st.body * 0.4) merged.push(x);
+    if (!merged.length) merged.push(Math.min(...pg.lines.map((l) => l.x), pg.w));
+    // a "column" left edge must be followed by a decent run of text; drop indent positions (x within 6em of a smaller edge with more lines)
+    const cols = [];
+    for (const x of merged) {
+      const prevCol = cols[cols.length - 1];
+      const cnt = bl.filter((l) => Math.abs(l.x - x) < st.body * 0.4).length;
+      if (prevCol != null && x - prevCol.x < st.body * 8 && cnt <= prevCol.cnt) continue;
+      cols.push({ x, cnt });
+    }
+    pg.cols = cols.map((c) => c.x);
+    const colOf = (l) => { let c = pg.cols[0]; for (const x of pg.cols) if (x <= l.x + st.body * 0.3) c = x; return c; };
+    const rights = new Map();
+    for (const l of bl) { const c = colOf(l); if (!rights.has(c)) rights.set(c, []); rights.get(c).push(l.xEnd); }
+    const colR = new Map();
+    for (const [c, arr] of rights) { arr.sort((a, b) => a - b); colR.set(c, arr[Math.floor(arr.length * 0.9)] || arr[arr.length - 1]); }
+    for (const l of pg.lines) {
+      l.colL = colOf(l);
+      l.colR = colR.get(l.colL) || Math.max(l.xEnd, pg.w - l.colL);
+      const width = l.colR - l.colL;
+      const lg = l.x - l.colL, rg = l.colR - l.xEnd;
+      l.center = width > st.body * 10 && lg > st.body * 2.5 && Math.abs(lg - rg) < st.body * 1.5 && !l.hard;
+    }
+  }
+
+  // roles
+  const hsizes = [];
+  for (const pg of pages) {
+    const ls = pg.lines;
+    // a small line is a footnote when nothing body-sized sits below it in the same column
+    const isFn = (i) => {
+      const l = ls[i];
+      if (l.size > st.body * 0.9 || l.y < pg.h * 0.55) return false;
+      if (!ls.some((b) => b !== l && b.colL === l.colL && b.size >= st.body * 0.92 && b.y < l.y)) return false;
+      return !ls.some((b) => b.colL === l.colL && b.size >= st.body * 0.92 && b.y > l.y);
+    };
+    for (let i = 0; i < ls.length; i++) {
+      const l = ls[i], prev = ls[i - 1], next = ls[i + 1];
+      const letters = (l.text.match(/[\p{L}\p{N}]/gu) || []).length;
+      l.role = 'p';
+      if (o.headings && l.size >= st.body * 1.18 && letters >= 2 && l.text.length <= 160) { l.role = 'h'; hsizes.push(l.size); }
+      else if (l.size >= st.body * 1.8 && letters === 1 && l.text.length <= 2) l.role = 'cap';
+      else if (o.footnotes && isFn(i)) l.role = 'fn';
+      else if (o.headings && l.allBold && !st.bodyBold && l.text.length < 90 && letters >= 2 && !l.bullet && !/[,;]$/.test(l.text)) {
+        const gapBefore = prev ? l.y - prev.y : Infinity;
+        const spaced = !prev || gapBefore > st.lineGap * 1.3 || gapBefore < 0 || prev.role === 'h';
+        const short = l.xEnd < l.colR - st.body * 3;
+        const nextBold = next && next.allBold && next.y - l.y < st.lineGap * 1.3;
+        const leftish = l.x - l.colL < st.body * 1.5 || l.center;
+        // must be followed closely by an ordinary text line, which rules out labels inside diagrams
+        const leadsText = next && next.colL === l.colL && next.y > l.y && next.y - l.y < st.lineGap * 2.8 && Math.abs(next.size - st.body) < st.body * 0.12 && next.text.length > 25;
+        if (spaced && leftish && leadsText && (short || !nextBold) && !(TERMINAL.test(l.text) && !short)) l.role = 'hb';
+      }
+    }
+  }
+  // heading levels from distinct sizes
+  const distinct = [...new Set(hsizes.map((s) => Math.round(s * 2) / 2))].sort((a, b) => b - a);
+  const levels = [];
+  for (const s of distinct) if (!levels.length || levels[levels.length - 1] - s > 0.6) levels.push(s);
+  st.levels = levels;
+  const lvlOf = (size) => { let best = 0, d = Infinity; levels.forEach((s, i) => { const dd = Math.abs(s - size); if (dd < d) { d = dd; best = i; } }); return best; };
+  for (const pg of pages) for (const l of pg.lines) {
+    if (l.role === 'h') l.lvl = lvlOf(l.size);
+    if (l.role === 'hb') { l.role = 'h'; l.lvl = levels.length; }
+  }
+  return st;
+}
+
+/* ---------- reflowable: paragraphs ---------- */
+function shouldBreak(P, L, st, para) {
+  if (P.hard || L.hard) return true;
+  if (P.center || L.center) return !(P.center && L.center && P.page === L.page && L.y > P.y && L.y - P.y < st.lineGap * 1.6);
+  if (L.bullet) return true;
+  if (Math.abs(L.size - P.size) > Math.max(1, P.size * 0.12)) return true;
+  const samePage = P.page === L.page;
+  const dy = L.y - P.y;
+  const newCol = !samePage || dy < -P.size * 0.5 || L.colL !== P.colL;
+  const expect = st.lineGap * (P.size / st.body);
+  if (!newCol && dy > Math.max(expect * 1.42, P.size * 1.6)) return true;
+  if (para && para.cls === 'li' && !L.bullet && !newCol && L.x > para.x + L.size * 0.3 && L.x - para.x < L.size * 4) return false;
+  const ind = L.x - L.colL;
+  const indented = ind > L.size * 0.6 && ind < L.size * 6;
+  if (indented && (newCol || L.x - P.x > L.size * 0.6)) return TERMINAL.test(P.text) || /^[\p{Lu}\p{N}"“‘'(\[«]/u.test(L.text) || !newCol;
+  const width = P.colR - P.colL;
+  const short = P.xEnd < P.colR - Math.max(P.size * 2, width * 0.1);
+  if (short && TERMINAL.test(P.text)) return true;
+  if (P.xEnd < P.colL + width * 0.5 && /^[\p{Lu}\p{N}"“‘(\[]/u.test(L.text)) return true;
+  if (newCol && !samePage && /^[\p{Ll}]/u.test(L.text)) return false;
+  return false;
+}
+
+function cloneSpans(sp) { return sp.map((s) => ({ t: s.t, b: s.b, i: s.i, sup: s.sup })); }
+
+function appendLine(para, P, L) {
+  const a = para.spans;
+  let last = a[a.length - 1];
+  const pt = P.text, lt = L.text;
+  if (/­$/.test(last.t)) last.t = last.t.replace(/­$/, '');
+  else if (/[\p{L}][-‐]$/u.test(pt) && /^\p{Ll}/u.test(lt)) last.t = last.t.replace(/[-‐]$/, '');
+  else if (/[\p{L}\p{N}][-‐–—/]$/u.test(pt)) {}
+  else if (isCJK(pt.slice(-1)) && isCJK(lt[0])) {}
+  else a.push({ t: ' ' });
+  a.push(...cloneSpans(L.spans));
+}
+
+function buildBlocks(pages, st, o) {
+  const blocks = [];
+  let para = null, pending = [], prev = null, cap = '', fn = null;
+  const flushFn = () => { if (fn) { (para ? pending : blocks).push(fn); fn = null; } };
+  const flush = () => {
+    if (para) blocks.push(para);
+    para = null;
+    flushFn();
+    blocks.push(...pending); pending = [];
+  };
+  for (const pg of pages) {
+    for (const item of pg.seq) {
+      if (item.img) { flushFn(); if (para) pending.push(item.img); else blocks.push(item.img); continue; }
+      const L = item;
+      if (L.role !== 'fn') flushFn();
+      if (L.role === 'cap') { cap += L.text; continue; }
+      if (L.role === 'fn') {
+        if (!fn || /^(\d{1,3}|[*†‡§¶])\s?/.test(L.text)) { flushFn(); fn = { type: 'p', cls: 'fn', spans: cloneSpans(L.spans), page: L.page, y: L.y }; }
+        else appendLine(fn, { text: fn.spans.map((s) => s.t).join('') }, L);
+        continue;
+      }
+      if (L.role === 'h') {
+        const lastB = blocks[blocks.length - 1];
+        if (!para && !pending.length && lastB && lastB.type === 'h' && lastB.lvl === L.lvl && lastB.page === L.page && L.y > lastB.lastY && L.y - lastB.lastY < L.size * 2.4) {
+          lastB.text += ' ' + L.text; lastB.lastY = L.y;
+        } else {
+          flush();
+          blocks.push({ type: 'h', lvl: L.lvl, text: L.text, page: L.page, y: L.y, lastY: L.y, size: L.size });
+        }
+        prev = null; continue;
+      }
+      if (para && prev && !shouldBreak(prev, L, st, para)) appendLine(para, prev, L);
+      else {
+        flush();
+        para = { type: 'p', spans: cloneSpans(L.spans), page: L.page, y: L.y, x: L.x, cls: L.center ? 'center' : L.hard ? 'hard' : L.bullet ? 'li' : '' };
+        if (cap) { para.spans[0].t = cap + para.spans[0].t; cap = ''; }
+      }
+      if (L.center && para.cls === 'center' && para.spans.length > L.spans.length) {
+        // keep line breaks inside centred blocks (poems, title pages)
+        const idx = para.spans.length - L.spans.length - 1;
+        if (para.spans[idx] && para.spans[idx].t === ' ') para.spans[idx] = { t: '', br: true };
+      }
+      prev = L;
+    }
+  }
+  flush();
+  // headings that are really big-print paragraphs
+  for (const b of blocks) if (b.type === 'h' && b.text.split(/\s+/).length > 28) { b.type = 'p'; b.spans = [{ t: b.text }]; b.cls = ''; }
+  return blocks;
+}
+
+/* ---------- reflowable: pipeline ---------- */
+async function convertFlow(o, pageList) {
+  const pdf = S.pdf;
+  const pages = [];
+  for (let k = 0; k < pageList.length; k++) {
+    check();
+    progress(k / pageList.length * 0.6, `Reading page ${pageList[k] + 1} of ${pdf.numPages}`);
+    pages.push(await extractPage(pdf, pageList[k], o));
+    if (k % 8 === 7) await tick();
+  }
+  progress(0.6, 'Finding paragraphs and headings');
+  let usedPage1AsCover = false;
+  if (o.running) stripRunning(pages, o);
+
+  // figures per page
+  for (const pg of pages) {
+    let figs = [];
+    if (o.figures && pg.boxes.length) {
+      const area = pg.w * pg.h;
+      const clipped = pg.boxes.map((b) => ({ x0: Math.max(0, b.x0), y0: Math.max(0, b.y0), x1: Math.min(pg.w, b.x1), y1: Math.min(pg.h, b.y1) }))
+        .filter((b) => b.x1 - b.x0 >= 36 && b.y1 - b.y0 >= 36 && (b.x1 - b.x0) * (b.y1 - b.y0) >= area * 0.01);
+      figs = mergeBoxes(clipped);
+      const textChars = pg.lines.reduce((a, l) => a + l.text.length, 0);
+      figs = figs.filter((b) => !((b.x1 - b.x0) * (b.y1 - b.y0) > area * 0.8 && textChars > 200)); // page backgrounds
+    }
+    pg.figs = figs;
+    if (figs.length) pg.lines = pg.lines.filter((l) => !figs.some((b) => {
+      const cx = (l.x + l.xEnd) / 2, cy = l.y - l.size * 0.35;
+      return cx > b.x0 && cx < b.x1 && cy > b.y0 && cy < b.y1;
+    }));
+  }
+  const st = analyze(pages, o);
+
+  // images: textless pages and figure crops
+  const images = [];
+  const q = o.quality === 'high' ? 0.9 : 0.82;
+  const figScale = o.quality === 'high' ? 3 : 2;
+  let figCount = 0, imgPages = 0;
+  const firstIdx = pageList[0];
+  let cover = null;
+  if (S.cover) cover = await coverFromUpload(S.cover);
+  for (let k = 0; k < pages.length; k++) {
+    const pg = pages[k];
+    const chars = pg.lines.reduce((a, l) => a + l.text.length, 0);
+    pg.seq = pg.lines.slice();
+    const wantCover = !cover && o.cover && pg.idx === 0;
+    const pageImg = (o.pageImages && chars < 20) || (wantCover && chars < 400);
+    if (!pageImg && !pg.figs.length && !wantCover) continue;
+    check();
+    progress(0.62 + k / pages.length * 0.3, `Drawing images on page ${pg.idx + 1}`);
+    const target = pageImg || wantCover ? (o.quality === 'high' ? 1800 : 1200) : pg.w * figScale;
+    const { canvas, scale } = await renderPage(pdf, pg.idx, target, 6);
+    if (wantCover) {
+      cover = { name: 'images/cover.jpg', blob: await toJpeg(canvas, 0.86), w: canvas.width, h: canvas.height };
+      if (chars < 400) { usedPage1AsCover = true; pg.seq = []; canvas.width = 0; continue; }
+    }
+    if (pageImg) {
+      if (!isBlank(canvas)) {
+        const name = `images/page-${String(pg.idx + 1).padStart(4, '0')}.jpg`;
+        images.push({ name, blob: await toJpeg(canvas, q), w: canvas.width, h: canvas.height });
+        pg.seq = [{ img: { type: 'img', src: name, cls: 'pageimg', alt: `Page ${pg.idx + 1}`, page: pg.idx, y: 0 } }];
+        imgPages++;
+      } else pg.seq = [];
+    } else {
+      for (const b of pg.figs) {
+        const pad = 3;
+        const c = crop(canvas, (b.x0 - pad) * scale, (b.y0 - pad) * scale, (b.x1 + pad) * scale, (b.y1 + pad) * scale);
+        if (isBlank(c)) continue;
+        figCount++;
+        const name = `images/fig-${String(figCount).padStart(4, '0')}.jpg`;
+        images.push({ name, blob: await toJpeg(c, q), w: c.width, h: c.height });
+        const block = { type: 'img', src: name, cls: 'fig', alt: 'Figure', page: pg.idx, y: b.y0 };
+        let at = pg.seq.findIndex((l) => !l.img && l.y > b.y0 + l.size * 0.2);
+        if (at < 0) at = pg.seq.length;
+        pg.seq.splice(at, 0, { img: block });
+      }
+    }
+    canvas.width = canvas.height = 0;
+    await tick();
+  }
+  progress(0.93, 'Building chapters');
+  const blocks = buildBlocks(pages, st, o);
+  const { files, nav } = makeChapters(blocks, pages, st, o, pageList);
+  let words = 0;
+  for (const b of blocks) words += (b.type === 'h' ? b.text : b.type === 'p' ? b.spans.map((s) => s.t).join('') : '').split(/\s+/).filter(Boolean).length;
+  return { fixed: false, files, nav, images, cover, st, stats: { pages: pageList.length, words, figures: figCount + imgPages }, usedPage1AsCover };
+}
+
+/* ---------- chapters ---------- */
+function makeChapters(blocks, pages, st, o, pageList) {
+  const inRange = new Set(pageList);
+  const vpOf = new Map(pages.map((p) => [p.idx, p.vp]));
+  const outline = S.outline.filter((e) => inRange.has(e.page));
+  const hCounts = new Map();
+  for (const b of blocks) if (b.type === 'h') hCounts.set(b.lvl, (hCounts.get(b.lvl) || 0) + 1);
+  let splitLvl = null;
+  for (const lv of [...hCounts.keys()].sort((a, b) => a - b)) if (hCounts.get(lv) >= 2) { splitLvl = lv; break; }
+  let mode = o.chapters;
+  if (mode === 'auto') mode = outline.length >= 2 ? 'outline' : splitLvl != null ? 'headings' : pageList.length > 30 ? 'pages' : 'none';
+  if (mode === 'outline' && !outline.length) mode = splitLvl != null ? 'headings' : 'pages';
+  if (mode === 'headings' && splitLvl == null) mode = 'pages';
+
+  const starts = new Map(); // block index -> title of new file
+  const anchors = []; // {bi, title, depth}
+  const minLvl = hCounts.size ? Math.min(...hCounts.keys()) : 0;
+  let baseLvl = mode === 'headings' ? splitLvl : minLvl;
+
+  if (mode === 'outline') {
+    const d0 = outline.filter((e) => e.depth === 0).length;
+    const splitDepth = d0 >= 2 ? 0 : outline.some((e) => e.depth === 1) ? 1 : 0;
+    for (const e of outline) {
+      const bi = findBlock(blocks, e, vpOf);
+      if (bi < 0) continue;
+      const depth = Math.max(0, e.depth - splitDepth);
+      if (e.depth <= splitDepth && !starts.has(bi)) starts.set(bi, e.title);
+      anchors.push({ bi, title: e.title, depth: Math.min(depth, 2) });
+      const b = blocks[bi];
+      if (b.type === 'p' && b.page === e.page && norm(b.spans.map((s) => s.t).join('')).replace(/\s/g, '') === norm(e.title).replace(/\s/g, '')) {
+        b.type = 'h'; b.text = b.spans.map((s) => s.t).join(''); b.lvl = baseLvl + depth;
+      }
+    }
+  } else if (mode === 'headings') {
+    blocks.forEach((b, bi) => {
+      if (b.type !== 'h') return;
+      if (b.lvl <= splitLvl) { starts.set(bi, b.text); anchors.push({ bi, title: b.text, depth: 0 }); }
+      else if (b.lvl === splitLvl + 1) anchors.push({ bi, title: b.text, depth: 1 });
+    });
+  } else if (mode === 'pages') {
+    let nextAt = pageList[0];
+    blocks.forEach((b, bi) => {
+      if (b.page >= nextAt) {
+        const last = Math.min(b.page + 19, pageList[pageList.length - 1]);
+        const t = `Pages ${b.page + 1}–${last + 1}`;
+        starts.set(bi, t); anchors.push({ bi, title: t, depth: 0 });
+        nextAt = b.page + 20;
+      }
+    });
+    blocks.forEach((b, bi) => { if (b.type === 'h' && b.lvl === minLvl) anchors.push({ bi, title: b.text, depth: 1 }); });
+    anchors.sort((a, b) => a.bi - b.bi);
+  }
+
+  // cut into files; also cap file size so older readers cope
+  const files = [];
+  let cur = null, size = 0;
+  const open = (title) => { cur = { title, blocks: [], href: `ch${String(files.length + 1).padStart(3, '0')}.xhtml` }; files.push(cur); size = 0; };
+  blocks.forEach((b, bi) => {
+    if (!cur) {
+      let t = starts.get(bi);
+      if (!t) { const h = blocks.slice(0, 40).find((x, i) => x.type === 'h' && !starts.has(i)); t = (starts.size ? 'Front matter' : (h?.text || o.title)); }
+      open(t);
+    } else if (starts.has(bi)) open(starts.get(bi));
+    else if (size > 140000 && b.type !== 'img') open(cur.title + ' (continued)');
+    b.file = cur;
+    cur.blocks.push(b);
+    size += b.type === 'p' ? b.spans.reduce((a, s) => a + s.t.length, 0) + 20 : 120;
+  });
+  if (!files.length) open(o.title);
+
+  // several bookmarks can land on the same block (e.g. a title page that became the cover); keep the one that names it
+  const byBlock = new Map();
+  for (const a of anchors) { if (!byBlock.has(a.bi)) byBlock.set(a.bi, []); byBlock.get(a.bi).push(a); }
+  for (const [bi, group] of byBlock) {
+    if (group.length < 2) continue;
+    const b = blocks[bi];
+    const bt = norm(b.type === 'h' ? b.text : b.type === 'p' ? b.spans.map((s) => s.t).join('') : '').replace(/\s/g, '');
+    const keep = group.find((a) => bt && bt.startsWith(norm(a.title).replace(/\s/g, '').slice(0, 24))) || group[0];
+    for (const a of group) if (a !== keep) a.drop = true;
+    if (starts.has(bi)) starts.set(bi, keep.title);
+  }
+  for (let i = anchors.length - 1; i >= 0; i--) if (anchors[i].drop) anchors.splice(i, 1);
+  for (const f of files) if (starts.has(blocks.indexOf(f.blocks[0]))) f.title = starts.get(blocks.indexOf(f.blocks[0]));
+
+  const nav = [];
+  const used = new Set();
+  anchors.forEach((a, k) => {
+    const b = blocks[a.bi];
+    if (!b.id) b.id = `n${k + 1}`;
+    if (used.has(a.bi + '|' + a.title)) return;
+    used.add(a.bi + '|' + a.title);
+    const isStart = b.file.blocks[0] === b;
+    nav.push({ title: a.title, file: b.file.href, anchor: isStart ? '' : b.id, depth: a.depth });
+  });
+  if (!nav.length || nav[0].file !== files[0].href) nav.unshift({ title: files[0].title, file: files[0].href, anchor: '', depth: 0 });
+  // keep depth sequence valid (no jumps of more than one level)
+  let prevDepth = -1;
+  for (const n of nav) { n.depth = Math.min(n.depth, prevDepth + 1); prevDepth = n.depth; }
+
+  for (const f of files) f.html = renderBlocks(f.blocks, baseLvl, st);
+  return { files, nav, mode };
+}
+
+function findBlock(blocks, e, vpOf) {
+  const cand = [];
+  blocks.forEach((b, i) => { if (b.page === e.page) cand.push(i); });
+  if (!cand.length) { const i = blocks.findIndex((b) => b.page > e.page); return i; }
+  const t = norm(e.title).replace(/\s/g, '');
+  if (t.length >= 2) {
+    const head = t.slice(0, 24);
+    for (const i of cand) {
+      const b = blocks[i];
+      const bt = norm(b.type === 'h' ? b.text : b.type === 'p' ? b.spans.map((s) => s.t).join('') : '').replace(/\s/g, '');
+      if (bt && (bt.startsWith(head) || (b.type === 'h' && head.startsWith(bt.slice(0, 24)) && bt.length >= 3))) return i;
+    }
+  }
+  if (e.top != null && vpOf.has(e.page)) {
+    const yTop = vpOf.get(e.page).convertToViewportPoint(0, e.top)[1];
+    for (const i of cand) if (blocks[i].y >= yTop - 4) return i;
+  }
+  return cand[0];
+}
+
+/* ---------- XHTML output ---------- */
+function spansHtml(spans, st) {
+  let out = '', run = null;
+  const close = () => {
+    if (!run) return;
+    const m = run.t.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    let h = esc(m[2]);
+    if (h) { if (run.sup) h = `<sup>${h}</sup>`; if (run.i) h = `<i>${h}</i>`; if (run.b) h = `<b>${h}</b>`; }
+    out += m[1] + h + m[3]; run = null;
+  };
+  for (const s of spans) {
+    if (s.br) { close(); out += '<br/>'; continue; }
+    const b = !!s.b && !st.bodyBold, i = !!s.i && !st.bodyItal, sup = !!s.sup;
+    if (run && (!s.t.trim() || (run.b === b && run.i === i && run.sup === sup))) { run.t += s.t; continue; }
+    close();
+    run = { t: s.t, b, i, sup };
+  }
+  close();
+  return out.replace(/ {2,}/g, ' ');
+}
+
+function renderBlocks(blocks, baseLvl, st) {
+  const parts = [];
+  for (const b of blocks) {
+    const id = b.id ? ` id="${b.id}"` : '';
+    if (b.type === 'h') {
+      const n = Math.max(1, Math.min(6, b.lvl - (baseLvl ?? 0) + 1));
+      parts.push(`<h${n}${id}>${esc(b.text)}</h${n}>`);
+    } else if (b.type === 'img') {
+      parts.push(`<div class="${b.cls}"${id}><img src="${b.src}" alt="${esc(b.alt)}"/></div>`);
+    } else {
+      const html = spansHtml(b.spans, st).trim();
+      if (!html) continue;
+      parts.push(`<p${b.cls ? ` class="${b.cls}"` : ''}${id}>${html}</p>`);
+    }
+  }
+  return parts.join('\n');
+}
+
+const CSS = (o) => `@charset "UTF-8";
+body { margin: 0 4%; line-height: 1.5; widows: 2; orphans: 2; }
+p { margin: 0; ${o.pstyle === 'spaced' ? 'margin-bottom: 0.8em; text-indent: 0;' : 'text-indent: 1.4em;'} text-align: justify; -webkit-hyphens: auto; hyphens: auto; }
+h1, h2, h3, h4, h5, h6 { line-height: 1.25; text-indent: 0; text-align: left; page-break-after: avoid; break-after: avoid; -webkit-hyphens: none; hyphens: none; }
+h1 { font-size: 1.6em; margin: 1.2em 0 0.9em; }
+h2 { font-size: 1.3em; margin: 1.4em 0 0.7em; }
+h3 { font-size: 1.12em; margin: 1.3em 0 0.6em; }
+h4, h5, h6 { font-size: 1em; margin: 1.2em 0 0.5em; }
+h1 + p, h2 + p, h3 + p, h4 + p, h5 + p, h6 + p, div.fig + p, p.center + p { text-indent: 0; }
+p.center { text-align: center; text-indent: 0; margin: 0.8em 0; }
+p.hard { text-indent: 0; text-align: left; }
+p.li { text-indent: -1.2em; margin-left: 1.2em; text-align: left; }
+p.fn { font-size: 0.82em; text-indent: 0; margin: 0.4em 0; }
+div.fig { text-align: center; margin: 1em 0; text-indent: 0; page-break-inside: avoid; break-inside: avoid; }
+div.fig img { max-width: 100%; }
+div.pageimg { text-align: center; margin: 0; page-break-before: always; break-before: page; }
+div.pageimg img { max-width: 100%; max-height: 95vh; }
+sup { font-size: 0.7em; line-height: 0; }
+div.cover { text-align: center; margin: 0; padding: 0; height: 100%; }
+div.cover img { max-width: 100%; max-height: 100%; height: 100%; object-fit: contain; }
+`;
+
+function xhtml(title, body, lang, extraHead = '', bodyAttr = '') {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${esc(lang)}" lang="${esc(lang)}">
+<head>
+<meta charset="UTF-8"/>
+<title>${esc(title)}</title>
+${extraHead}</head>
+<body${bodyAttr}>
+${body}
+</body>
+</html>
+`;
+}
+
+async function packEpub(book, o) {
+  if (!window.JSZip) throw new Error('the ZIP library did not load; check your connection and reload');
+  const zip = new JSZip();
+  const id = 'urn:uuid:' + uuid();
+  const lang = o.lang;
+  const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+  const opts = { createFolders: false };
+  zip.file('mimetype', 'application/epub+zip', { compression: 'STORE', createFolders: false });
+  zip.file('META-INF/container.xml', `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>
+`, opts);
+
+  const manifest = [], spine = [];
+  const add = (mid, href, type, props) => manifest.push(`<item id="${mid}" href="${esc(href)}" media-type="${type}"${props ? ` properties="${props}"` : ''}/>`);
+  add('nav', 'nav.xhtml', 'application/xhtml+xml', 'nav');
+  add('ncx', 'toc.ncx', 'application/x-dtbncx+xml');
+
+  const css = '<link rel="stylesheet" type="text/css" href="styles.css"/>\n';
+  let coverItemId = null;
+  if (!book.fixed) {
+    add('css', 'styles.css', 'text/css');
+    zip.file('OEBPS/styles.css', CSS(o), opts);
+  }
+  if (book.cover && !book.cover.reuse) {
+    coverItemId = 'cover-image';
+    add(coverItemId, book.cover.name, 'image/jpeg', 'cover-image');
+    zip.file('OEBPS/' + book.cover.name, book.cover.blob, { ...opts, compression: 'STORE' });
+    if (!book.fixed) {
+      zip.file('OEBPS/cover.xhtml', xhtml('Cover', `<div class="cover"><img src="${book.cover.name}" alt="Cover"/></div>`, lang, css, ' epub:type="cover"'), opts);
+      add('cover', 'cover.xhtml', 'application/xhtml+xml');
+      spine.push('<itemref idref="cover"/>');
+    } else {
+      const { w, h } = book.cover;
+      zip.file('OEBPS/cover.xhtml', xhtml('Cover', `<div style="width:${w}px;height:${h}px;margin:0;padding:0"><img src="${book.cover.name}" alt="Cover" style="width:${w}px;height:${h}px"/></div>`, lang, `<meta name="viewport" content="width=${w}, height=${h}"/>\n`, ' style="margin:0;padding:0"'), opts);
+      add('cover', 'cover.xhtml', 'application/xhtml+xml');
+      spine.push('<itemref idref="cover"/>');
+    }
+  }
+  book.images.forEach((im, k) => {
+    const props = book.cover?.reuse === im.name ? 'cover-image' : '';
+    const mid = props ? 'cover-image' : `img${k + 1}`;
+    if (props) coverItemId = mid;
+    add(mid, im.name, 'image/jpeg', props);
+    zip.file('OEBPS/' + im.name, im.blob, { ...opts, compression: 'STORE' });
+  });
+
+  if (book.fixed) {
+    for (const f of book.files) {
+      const body = `<div style="width:${f.w}px;height:${f.h}px;margin:0;padding:0"><img src="${f.img}" alt="${esc(f.title)}" style="width:${f.w}px;height:${f.h}px"/></div>`;
+      zip.file('OEBPS/' + f.href, xhtml(f.title, body, lang, `<meta name="viewport" content="width=${f.w}, height=${f.h}"/>\n`, ' style="margin:0;padding:0"'), opts);
+      add(f.id, f.href, 'application/xhtml+xml');
+      spine.push(`<itemref idref="${f.id}"/>`);
+    }
+  } else {
+    book.files.forEach((f, k) => {
+      const fid = `c${k + 1}`;
+      zip.file('OEBPS/' + f.href, xhtml(f.title, f.html || '<p></p>', lang, css), opts);
+      add(fid, f.href, 'application/xhtml+xml');
+      spine.push(`<itemref idref="${fid}"/>`);
+    });
+  }
+
+  // nav.xhtml (nested ol)
+  const navHtml = (() => {
+    let out = '', depth = -1;
+    for (const n of book.nav) {
+      const href = esc(n.file + (n.anchor ? '#' + n.anchor : ''));
+      if (n.depth > depth) out += '\n<ol>';
+      else { out += '</li>'; for (let d = depth; d > n.depth; d--) out += '</ol></li>'; }
+      out += `\n<li><a href="${href}">${esc(n.title)}</a>`;
+      depth = n.depth;
+    }
+    out += '</li>'; for (let d = depth; d > 0; d--) out += '</ol></li>';
+    return out + '</ol>';
+  })();
+  const firstFile = book.files[0]?.href;
+  zip.file('OEBPS/nav.xhtml', xhtml(o.title, `<nav epub:type="toc" id="toc"><h1>Contents</h1>${navHtml}\n</nav>
+<nav epub:type="landmarks" hidden="hidden"><ol>${coverItemId && manifest.some((m) => m.includes('"cover.xhtml"')) ? '<li><a epub:type="cover" href="cover.xhtml">Cover</a></li>' : ''}<li><a epub:type="bodymatter" href="${esc(firstFile)}">Start</a></li></ol></nav>`, lang, book.fixed ? '' : css), opts);
+
+  // toc.ncx
+  let play = 0, np = 0;
+  const orderOf = new Map();
+  const ncxPoints = (() => {
+    let out = '', depth = -1;
+    for (const n of book.nav) {
+      if (n.depth <= depth) for (let d = depth; d >= n.depth; d--) out += '</navPoint>';
+      const src = n.file + (n.anchor ? '#' + n.anchor : '');
+      if (!orderOf.has(src)) orderOf.set(src, ++play);
+      np++;
+      out += `\n<navPoint id="np${np}" playOrder="${orderOf.get(src)}"><navLabel><text>${esc(n.title)}</text></navLabel><content src="${esc(n.file + (n.anchor ? '#' + n.anchor : ''))}"/>`;
+      depth = n.depth;
+    }
+    for (let d = depth; d >= 0; d--) out += '</navPoint>';
+    return out;
+  })();
+  const maxDepth = Math.max(1, ...book.nav.map((n) => n.depth + 1));
+  zip.file('OEBPS/toc.ncx', `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="${esc(lang)}">
+<head><meta name="dtb:uid" content="${id}"/><meta name="dtb:depth" content="${maxDepth}"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head>
+<docTitle><text>${esc(o.title)}</text></docTitle>
+<navMap>${ncxPoints}
+</navMap>
+</ncx>
+`, opts);
+
+  const meta = [
+    `<dc:identifier id="bookid">${id}</dc:identifier>`,
+    `<dc:title>${esc(o.title)}</dc:title>`,
+    o.author ? `<dc:creator id="creator">${esc(o.author)}</dc:creator>` : '',
+    `<dc:language>${esc(lang)}</dc:language>`,
+    `<meta property="dcterms:modified">${now}</meta>`,
+    coverItemId ? `<meta name="cover" content="${coverItemId}"/>` : '',
+    book.fixed ? '<meta property="rendition:layout">pre-paginated</meta><meta property="rendition:orientation">auto</meta><meta property="rendition:spread">landscape</meta>' : '',
+  ].filter(Boolean).join('\n    ');
+  zip.file('OEBPS/content.opf', `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="${esc(lang)}">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    ${meta}
+  </metadata>
+  <manifest>
+    ${manifest.join('\n    ')}
+  </manifest>
+  <spine toc="ncx">
+    ${spine.join('\n    ')}
+  </spine>
+</package>
+`, opts);
+
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/epub+zip', compression: 'DEFLATE', compressionOptions: { level: 6 } },
+    (m) => progress(0.96 + m.percent / 100 * 0.04));
+}
+
+/* ---------- result & proof ---------- */
+function resetResult() {
+  S.result = null;
+  for (const u of S.urls) URL.revokeObjectURL(u);
+  S.urls = [];
+  ui.result.hidden = true; ui.toolbar.hidden = true; ui.page.hidden = true; ui.empty.hidden = false;
+  ui.dlmsg.hidden = true;
+}
+
+function showResult() {
+  const { book, blob, o } = S.result;
+  const st = book.stats;
+  const items = [
+    ['Pages', st.pages.toLocaleString()],
+    book.fixed ? null : ['Words', st.words.toLocaleString()],
+    ['Chapters', (book.fixed ? book.nav.length : book.files.length).toLocaleString()],
+    book.fixed ? null : ['Images', st.figures.toLocaleString()],
+    ['EPUB size', fmtBytes(blob.size)],
+  ].filter(Boolean);
+  ui.stats.replaceChildren(...items.map(([k, v]) => { const d = document.createElement('div'); d.innerHTML = `<dt></dt><dd></dd>`; d.firstChild.textContent = k; d.lastChild.textContent = v; return d; }));
+  ui.result.hidden = false;
+
+  const urlFor = new Map();
+  const mk = (name, b) => { const u = URL.createObjectURL(b); S.urls.push(u); urlFor.set(name, u); };
+  for (const im of book.images) mk(im.name, im.blob);
+  if (book.cover?.blob) mk(book.cover.name, book.cover.blob);
+  S.result.urlFor = urlFor;
+
+  // proof entries: cover + every file
+  const entries = [];
+  const coverName = book.cover ? (book.cover.reuse || book.cover.name) : null;
+  if (coverName && !(book.fixed && book.cover.reuse)) entries.push({ title: 'Cover', html: `<div class="cover"><img src="${coverName}" alt="Cover"/></div>` });
+  if (book.fixed) {
+    for (const f of book.files) entries.push({ title: f.title, html: `<div class="pageimg"><img src="${f.img}" alt="${esc(f.title)}"/></div>` });
+  } else {
+    for (const f of book.files) entries.push({ title: f.title, html: f.html });
+  }
+  S.result.entries = entries;
+  ui.chsel.replaceChildren(...entries.map((e, i) => { const op = document.createElement('option'); op.value = i; op.textContent = `${i + 1}. ${e.title}`.slice(0, 90); return op; }));
+  ui.page.classList.toggle('spaced', o.pstyle === 'spaced');
+  ui.page.lang = o.lang;
+  if (window.matchMedia('(max-width: 900px)').matches) ui.result.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  ui.toolbar.hidden = false; ui.empty.hidden = true; ui.page.hidden = false;
+  showChapter(entries.length > 1 && entries[0].title === 'Cover' ? 1 : 0);
+
+  if (book.fixed === false && book.usedPage1AsCover) notice('Page 1 became the cover image, so it is not repeated inside the book.');
+}
+
+function showChapter(i) {
+  const es = S.result?.entries; if (!es) return;
+  i = Math.max(0, Math.min(es.length - 1, i));
+  ui.chsel.value = i;
+  ui.prev.disabled = i === 0; ui.next.disabled = i === es.length - 1;
+  const doc = new DOMParser().parseFromString(`<div xmlns="http://www.w3.org/1999/xhtml">${es[i].html}</div>`, 'application/xhtml+xml');
+  if (doc.getElementsByTagName('parsererror').length) { ui.page.textContent = 'This chapter could not be displayed.'; return; }
+  const root = document.importNode(doc.documentElement, true);
+  root.querySelectorAll('img').forEach((img) => { const u = S.result.urlFor.get(img.getAttribute('src')); if (u) img.src = u; img.loading = 'lazy'; });
+  ui.page.replaceChildren(...root.childNodes);
+  ui.reader.scrollTop = 0;
+}
+
+async function saveEpub() {
+  if (!S.result) return;
+  const { blob, filename } = S.result;
+  ui.dlmsg.hidden = true;
+  let dl = null;
+  try { dl = window.claude?.use ? await window.claude.use('downloads') : null; } catch {}
+  if (dl) {
+    try {
+      await dl.save({ filename, data: blob });
+      ui.dlmsg.textContent = `Saved ${filename}`; ui.dlmsg.hidden = false;
+    } catch (e) {
+      const code = e?.code;
+      ui.dlmsg.textContent = code === 'declined' ? 'Download cancelled.' : code === 'rate_limited' ? 'A save prompt is already open.' : 'Saving is not available in this view. Open the page in a browser tab to download.';
+      ui.dlmsg.hidden = false;
+    }
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+  ui.dlmsg.textContent = `Downloading ${filename}`; ui.dlmsg.hidden = false;
+}
+
+// expose for automated checks
+window.__reflow = { openFile, runConvert, state: S };
+</script>
+</body>
+</html>

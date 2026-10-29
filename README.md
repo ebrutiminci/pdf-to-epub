@@ -1,0 +1,34 @@
+# Reflow: PDF to EPUB
+
+A PDF to EPUB converter that runs entirely in the browser. PDFs are never uploaded: reading, converting and packaging all happen on your device.
+
+It is a single static page (`index.html`), so it can be hosted anywhere, including GitHub Pages.
+
+## What it does
+
+- Rejoins PDF lines into real paragraphs, repairs words hyphenated at line ends, and keeps paragraphs whole across page and column breaks
+- Removes running headers and page numbers
+- Builds chapters and a nested table of contents from the PDF's bookmarks, or from large and bold headings when there are none
+- Keeps bold, italic and superscripts; moves footnotes out of the running text
+- Cuts figures and photos out of the page; keeps pages without text (plates, scans) as images
+- Uses page 1 as the cover, or an image you upload
+- Detects scanned PDFs and offers a fixed-layout "Page images" EPUB instead
+- Opens password-protected PDFs; supports page ranges
+- Shows a chapter-by-chapter proof before you download
+
+Output is EPUB 3 with an EPUB 2 `toc.ncx` for older readers. It opens in Apple Books, Kobo, Google Play Books and Calibre, and on Kindle via Send to Kindle. Test conversions pass [EPUBCheck](https://github.com/w3c/epubcheck) with no errors or warnings.
+
+## Use it
+
+Open `index.html` in a browser, or publish it with GitHub Pages: **Settings → Pages → Deploy from a branch → `main` / root**. The page loads [pdf.js](https://mozilla.github.io/pdf.js/) and [JSZip](https://stuk.github.io/jszip/) from the jsDelivr CDN, so it needs an internet connection to start.
+
+## Limits
+
+- Scanned PDFs have no text layer. Reflowing them would need OCR, so they are kept as page images.
+- Tables and vector charts come out as lines of text; labels inside diagrams may mix into the text.
+- Complex magazine-style layouts convert better with the Page images layout.
+
+## Development
+
+- `tools/make_sample.py` builds the sample PDF (public-domain text from *Alice's Adventures in Wonderland*) with ReportLab and Pillow.
+- `tools/embed_sample.py index.html sample.pdf` embeds that PDF into the page for the "Try the sample book" button.
