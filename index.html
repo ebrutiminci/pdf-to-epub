@@ -441,6 +441,8 @@ async function openFile(file) {
   S.pdf = null; S.file = file; S.name = file.name;
   ui.drop.hidden = true; ui.card.hidden = false;
   ui.fname.textContent = file.name; ui.fmeta.textContent = `${fmtBytes(file.size)} · opening…`; ui.chips.replaceChildren(); ui.thumb.replaceChildren();
+  const problem = await notPdfReason(file);
+  if (problem) { notice(problem, 'err'); ui.fmeta.textContent = fmtBytes(file.size); return; }
   let L;
   try { L = await pdfjs(); } catch (err) {
     notice('The PDF reader could not load. Check your internet connection and reload the page.', 'err'); return;
@@ -455,12 +457,27 @@ async function openFile(file) {
     S.pdf = await task.promise;
   } catch (err) {
     ui.pwform.hidden = true;
-    notice(`This file could not be opened as a PDF (${err?.message || err}). It may be damaged or not a PDF.`, 'err');
+    notice(file.size < 4096
+      ? `“${file.name}” is only ${fmtBytes(file.size)}, too small to hold a real document. It is probably a cloud shortcut or a download that did not finish. Download the file again, then choose it here.`
+      : `This file could not be opened as a PDF (${err?.message || err}). It may be damaged, or only part of it was downloaded. Check that it opens in a PDF viewer, or download it again.`, 'err');
     ui.fmeta.textContent = fmtBytes(file.size);
     return;
   }
   ui.pwform.hidden = true;
   await inspect();
+}
+
+// Explains the usual reasons a ".pdf" file holds no PDF: empty files, cloud placeholders, saved error pages
+async function notPdfReason(file) {
+  const name = `“${file.name}”`;
+  if (file.size === 0) return `${name} is empty (0 B). It is probably a cloud shortcut or a download that did not finish. Download the file again, then choose it here.`;
+  let head = '';
+  try { head = new TextDecoder('latin1').decode(await file.slice(0, 1024).arrayBuffer()); } catch { return ''; }
+  if (head.includes('%PDF-')) return '';
+  if (/^\s*(<!doctype|<html|<\?xml|<head|<body|<)/i.test(head)) return `${name} is a web page saved with a .pdf name, not a PDF. This happens when a download link has expired or needs a login. Open the link in your browser, download the PDF again, then choose it here.`;
+  if (file.size < 4096) return `${name} is only ${fmtBytes(file.size)}, so it is probably a cloud shortcut or a failed download, not a real PDF. Open it in its cloud app (iCloud, Google Drive, OneDrive, Dropbox) and download it to this device, or download it again, then choose it here.`;
+  if (/^PK\x03\x04/.test(head)) return `${name} is a ZIP archive (or an EPUB or Word file) renamed to .pdf. If it is a ZIP, unzip it and choose the PDF inside.`;
+  return `${name} does not contain PDF data. It may be another kind of file renamed to .pdf, or it may be damaged.`;
 }
 
 function askPassword(update, wrong) {
