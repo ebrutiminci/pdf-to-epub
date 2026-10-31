@@ -12,7 +12,8 @@ It is a single static page (`index.html`), so it can be hosted anywhere, includi
 - Keeps bold, italic and superscripts; moves footnotes out of the running text
 - Cuts figures and photos out of the page; keeps pages without text (plates, scans) as images
 - Uses page 1 as the cover, or an image you upload
-- Detects scanned PDFs and offers a fixed-layout "Page images" EPUB instead
+- Reads scanned PDFs with text recognition (OCR, via [Tesseract](https://github.com/naptha/tesseract.js)) in 14 languages including English and Turkish, and keeps photos found on scanned pages
+- Offers a fixed-layout "Page images" EPUB for comics, magazines and scans you want to keep exactly as they look
 - Opens password-protected PDFs; supports page ranges
 - Shows a chapter-by-chapter proof before you download
 
@@ -20,11 +21,12 @@ Output is EPUB 3 with an EPUB 2 `toc.ncx` for older readers. It opens in Apple B
 
 ## Use it
 
-Open `index.html` in a browser, or publish it with GitHub Pages: **Settings → Pages → Deploy from a branch → `main` / root**. The page loads [pdf.js](https://mozilla.github.io/pdf.js/) and [JSZip](https://stuk.github.io/jszip/) from the jsDelivr CDN, so it needs an internet connection to start.
+Open `index.html` in a browser, or publish it with GitHub Pages: **Settings → Pages → Deploy from a branch → `main` / root**. The page loads [pdf.js](https://mozilla.github.io/pdf.js/), [JSZip](https://stuk.github.io/jszip/) and, for scanned pages, [Tesseract.js](https://github.com/naptha/tesseract.js) and its language data from the jsDelivr CDN, so it needs an internet connection to start. The language data (2–4 MB) is cached in the browser after the first use.
 
 ## Limits
 
-- Scanned PDFs have no text layer. Reflowing them would need OCR, so they are kept as page images.
+- Text recognition is accurate on clean print (about 99% of words in tests) but slower: a few seconds per page. It can misread faded, skewed or handwritten pages, italics, and unusual fonts. Bold and italic are not recognised in scans.
+- Inside the claude.ai preview, text recognition cannot download its language data; use the GitHub Pages site.
 - Tables and vector charts come out as lines of text; labels inside diagrams may mix into the text.
 - Complex magazine-style layouts convert better with the Page images layout.
 
